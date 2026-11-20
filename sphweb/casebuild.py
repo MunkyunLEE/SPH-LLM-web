@@ -162,6 +162,11 @@ def build(spec, geom=None, layers=4):
     dx = float(spec["particle"]["dx"])
     lo = np.asarray(spec["domain"]["min"], float)
     hi = np.asarray(spec["domain"]["max"], float)
+    dim = int(spec.get("dim", 3))
+    y0 = None
+    if dim == 2:
+        y0 = dx * (np.round(float(spec.get("plane_y", 0.5 * (lo[1] + hi[1]))) / dx - 0.5) + 0.5)
+        lo[1] = hi[1] = y0
     warn = []
     bound = np.zeros((0, 3))
     normals = np.zeros((0, 3))
@@ -213,6 +218,8 @@ def build(spec, geom=None, layers=4):
                         warn.append(f"벽이 입자 간격에 비해 얇아 바깥쪽에 경계 입자 {len(extra):,}개를 더해 {layers}층을 맞췄습니다")
                 bound = np.vstack([solid, extra])
                 normals = 2.0 * (np.vstack([cp, ecp]) - bound)
+                if dim == 2:
+                    normals[:, 1] = 0.0
                 group = np.array([walls.index(g) for g in tg[keep][np.concatenate([tri, etri])]], int)
     fl = []
     for b in spec.get("fluid_blocks", []):
@@ -227,5 +234,7 @@ def build(spec, geom=None, layers=4):
         warn.append("유체 입자가 없습니다. 유체 블록을 추가해 주세요")
     if spec.get("inlets"):
         warn.append("유입구는 3단계에서 계산에 연결됩니다. 이번 해석에서는 무시합니다")
-    return {"fluid": fluid, "bound": bound, "normals": normals, "group": group, "group_names": names, "warnings": warn, "dx": dx, "domain": (lo, hi)}
+    if dim == 2 and not len(fluid) and spec.get("fluid_blocks"):
+        warn.append(f"2D 단면 y = {y0:g} mm 에 걸친 유체 블록이 없습니다. 단면 위치를 유체 블록 안으로 옮겨 주세요")
+    return {"fluid": fluid, "bound": bound, "normals": normals, "group": group, "group_names": names, "warnings": warn, "dx": dx, "domain": (lo, hi), "dim": dim, "plane_y": y0}
 

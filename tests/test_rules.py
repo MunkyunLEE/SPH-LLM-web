@@ -25,6 +25,13 @@ CASES = [
     ("층류 점성으로 바꿔", [{"op": "set_solver", "viscosity": "laminar"}]),
     ("인공 점성 0.05로 해줘", [{"op": "set_solver", "viscosity": "artificial", "alpha": 0.05}]),
     ("(1000, 300, 40) mm 에 프로브 추가해줘", [{"op": "add_probe", "point": [1000.0, 300.0, 40.0]}]),
+    ("2D로 해석해줘", [{"op": "set_dim", "dim": 2}]),
+    ("3D로 바꿔", [{"op": "set_dim", "dim": 3}]),
+    ("2D로 하고 단면 y 300 mm", [{"op": "set_dim", "dim": 2, "plane_y": 300.0}]),
+    ("입자 2만 개로 해줘", [{"op": "set_particle", "count": 20000}]),
+    ("유체 입자 5000개", [{"op": "set_particle", "count": 5000}]),
+    ("Verlet으로 바꿔줘", [{"op": "set_solver", "scheme": "verlet"}]),
+    ("음속 계수 10으로", [{"op": "set_solver", "coefsound": 10.0}]),
 ]
 
 
@@ -33,7 +40,8 @@ def test_rules_complete(text, expected):
     ops, reply, info = rules.parse(text)
     assert ops == expected
     assert info["complete"], info
-    S.apply_ops(S.default_spec(), [o for o in ops if o["op"] not in ("remove",)])
+    base, _ = S.apply_ops(S.default_spec(), [{"op": "add_fluid_block", "box": {"min": [0, 0, 0], "max": [400, 600, 300]}}])
+    S.apply_ops(base, [o for o in ops if o["op"] not in ("remove",)])
 
 
 def test_ask_when_missing():

@@ -16,12 +16,19 @@ GRID_MAX = 120000
 SHOW_MAX = 400000
 
 
-def grid_for(lo, hi, dx):
+def grid_for(lo, hi, dx, dim=3):
     lo, hi = np.asarray(lo, float), np.asarray(hi, float)
     size = np.maximum(hi - lo, dx)
-    h = max(dx, (np.prod(size) / GRID_MAX) ** (1 / 3))
-    n = np.maximum(np.floor(size / h).astype(int), 2)
+    if dim == 2:
+        h = max(0.5 * dx, (size[0] * size[2] / GRID_MAX) ** 0.5)
+        n = np.maximum(np.floor(size / h).astype(int), 2)
+        n[1] = 1
+    else:
+        h = max(dx, (np.prod(size) / GRID_MAX) ** (1 / 3))
+        n = np.maximum(np.floor(size / h).astype(int), 2)
     origin = lo + 0.5 * (size - (n - 1) * h)
+    if dim == 2:
+        origin[1] = lo[1]
     g = np.meshgrid(*[origin[k] + h * np.arange(n[k]) for k in range(3)], indexing="ij")
     pts = np.stack([a.transpose(2, 1, 0).ravel() for a in g], 1)
     return {"n": n.tolist(), "origin": origin.tolist(), "h": float(h)}, pts
@@ -100,16 +107,16 @@ class Runner:
         dx = case["dx"]
         lo, hi = case["domain"]
         zs = float(fluid[:, 2].max())
-        hswl = max(zs - float(fluid[:, 2].min()) + dx, 2 * dx)
+        hswl = max(zs - float(fluid[:, 2].min()), 2 * dx)
         rho0 = float(spec["fluid"]["rho0"])
         lam = sol.get("viscosity") == "laminar"
         visco = float(spec["fluid"]["mu"]) / rho0 if lam else float(sol.get("alpha", 0.02))
-        p = Params(dp=dx, hswl=hswl, rho0=rho0, gravity=tuple(spec["gravity"]), cfl=float(sol.get("cfl", 0.2)), visco=visco, visco_type="laminar" if lam else "artificial", ddt=float(sol.get("ddt", 0.1)))
-        s = wcsph.Solver(p, fluid, bound, domain=(lo, hi), bound_normals=case["normals"] if mdbc and len(bound) else None)
+        p = Params(dp=dx, hswl=hswl, rho0=rho0, gravity=tuple(spec["gravity"]), cfl=float(sol.get("cfl", 0.2)), visco=visco, visco_type="laminar" if lam else "artificial", ddt=float(sol.get("ddt", 0.1)), dim=case["dim"], scheme=sol.get("scheme", "symplectic"), coefsound=float(sol.get("coefsound", 20.0)))
+        s = wcsph.Solver(p, fluid, bound, domain=(lo, hi), bound_normals=case["normals"] if mdbc and len(bound) else None, cell_div=2)
         s.hydrostatic(zs, bound=False)
         stamp = time.strftime("%Y%m%d-%H%M%S")
         out = os.path.join(self.root, stamp)
-        ginfo, gpts = grid_for(lo, hi, dx)
+        ginfo, gpts = grid_for(lo, hi, dx, case["dim"])
         probes = [m for m in spec.get("monitors", []) if "point" in m]
         ppts = np.array([m["point"] for m in probes], float).reshape(-1, 3)
         groups = case["group_names"] or (["벽"] if len(bound) else [])
@@ -126,7 +133,7 @@ class Runner:
         for m in probes:
             series[f"probe.{m['id']}.speed"] = []
             series[f"probe.{m['id']}.pressure"] = []
-        self._set(state="running", message="계산 중", t_end=t_end, n=int(len(fluid)), nbound=int(len(bound)), dir=out, device=self.arch, warnings=warn, probes=probes, groups=groups, series=series, grid=ginfo, params={"h": p.h, "cs0": p.cs0, "dp": dx, "boundary": "mDBC" if mdbc else "DBC", "viscosity": "층류" if lam else f"인공 α={visco:g}"})
+        self._set(state="running", message="계산 중", t_end=t_end, n=int(len(fluid)), nbound=int(len(bound)), dir=out, device=self.arch, warnings=warn, probes=probes, groups=groups, series=series, grid=ginfo, params={"h": p.h, "cs0": p.cs0, "dp": dx, "boundary": "mDBC" if mdbc else "DBC", "viscosity": "층류" if lam else f"인공 α={visco:g}", "dim": case["dim"], "plane_y": case["plane_y"], "scheme": "Verlet" if p.scheme == "verlet" else "Symplectic", "coefsound": p.coefsound, "neighbors": int(round((np.pi * p.support**2 if case["dim"] == 2 else 4.0 / 3.0 * np.pi * p.support**3) / p.vol))})
         gvec = np.asarray(spec["gravity"], float)
         mass = p.mass
         stops = spec.get("stops", [])
@@ -201,7 +208,12 @@ class Runner:
             except queue.Empty:
                 if paused:
                     continue
-            s.step()
+            try:
+                s.advance(s.steps_until(min(nxt, t_end), 16))
+            except FloatingPointError:
+                emit()
+                self._set(state="error", message="시간 간격 계산이 발산해 해석을 멈췄습니다")
+                return
             if not math.isfinite(s.time) or s.info()["out"] > 0.5 * len(fluid):
                 emit()
                 self._set(state="error", message="입자 절반 이상이 밀도 범위를 벗어나 해석을 멈췄습니다 (발산)")

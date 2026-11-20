@@ -113,6 +113,25 @@ def parse(text, geom=None, spec=None):
         p.ops.append({"op": "set_solver", "cfl": float(m.group(1))})
         p.take(m)
 
+    for m in re.finditer(r"\b([23])\s*[dD]\s*(?:로|으로)?\s*(?:해석|계산|바꿔|설정|해|모드)?", t):
+        o = {"op": "set_dim", "dim": int(m.group(1))}
+        p.ops.append(o)
+        p.take(m)
+        mm = re.search(rf"(?:단면|평면)\s*y\s*(?:=|는|을|를)?\s*({NUM})\s*({LEN_U})?", t)
+        if mm and o["dim"] == 2:
+            o["plane_y"] = _len(mm.group(1), mm.group(2) or "mm")
+            p.take(mm)
+    for m in re.finditer(rf"(?:유체\s*)?입자\s*(?:수|개수)?\s*(?:를|을|는)?\s*({NUM})\s*(만|천)?\s*개", t):
+        n = float(m.group(1)) * {"만": 10000, "천": 1000, None: 1}[m.group(2)]
+        p.ops.append({"op": "set_particle", "count": int(n)})
+        p.take(m)
+    for m in re.finditer(r"(verlet|symplectic|버렛|심플렉틱)\s*(?:적분)?\s*(?:으로|로)?\s*(?:바꿔|설정|해|써|사용)?", t, re.I):
+        k = m.group(1).lower()
+        p.ops.append({"op": "set_solver", "scheme": "verlet" if k in ("verlet", "버렛") else "symplectic"})
+        p.take(m)
+    for m in re.finditer(rf"음속\s*계수\s*(?:를|을|는)?\s*({NUM})\s*(?:으로|로)?\s*(?:바꿔|설정|해)?", t):
+        p.ops.append({"op": "set_solver", "coefsound": float(m.group(1))})
+        p.take(m)
     for m in re.finditer(r"(mdbc|dbc)\s*(?:경계)?\s*(?:로|으로)?\s*(?:바꿔|설정|해|써|사용)?", t, re.I):
         p.ops.append({"op": "set_solver", "boundary": m.group(1).lower()})
         p.take(m)

@@ -19,7 +19,10 @@
   <a class="sub" href="#sph-eq">4-2. 지배방정식</a>
   <a class="sub" href="#sph-bc">4-3. 벽 경계 (mDBC)</a>
   <a class="sub" href="#sph-time">4-4. 시간적분</a>
-  <a class="sub" href="#sph-out">4-5. 결과 표시</a>
+  <a class="sub" href="#sph-res">4-5. 입자 수와 반경</a>
+  <a class="sub" href="#sph-2d">4-6. 2D 모드</a>
+  <a class="sub" href="#sph-speed">4-7. 속도 선택지</a>
+  <a class="sub" href="#sph-out">4-8. 결과 표시</a>
   <a href="#case">5. 케이스 구성</a>
   <a href="#verify">6. 검증 계획</a>
   <a href="#llm">7. LLM 연결 방식</a>
@@ -79,7 +82,28 @@
 <p>Symplectic: 예측 (Δt/2 로 위치·속도·밀도) → 이웃 재탐색 → 다시 힘 계산 → 보정 (밀도는 ρ<sub>n+1</sub> = ρ<sub>n</sub>(2−ε)/(2+ε), ε = −(dρ/dt / ρ)Δt, 위치는 두 속도의 평균).</p>
 <div class="eq">Δt = CFL · min( √(h/|a|<sub>max</sub>),  h / (max(c<sub>0</sub>, 10|v|<sub>max</sub>) + h·max(<b>r</b>·<b>v</b>/(r²+η²))) ),  CFL = 0.2<span class="n">(9)</span></div>
 <p>밀도가 0.7ρ<sub>0</sub> ~ 1.3ρ<sub>0</sub> 를 벗어나거나 해석 영역 밖으로 나간 입자는 제외합니다 (DualSPHysics 와 같음).</p>
-<h3 id="sph-out">4-5. 결과 표시</h3>
+<h3 id="sph-res">4-5. 입자 수 · 입자 간격 · 상호작용 반경</h3>
+<p>입자 간격 dp 를 정하면 나머지가 따라 정해집니다. 화면에서 "유체 입자 수" 를 넣으면 유체 블록이 빈틈없이 채워지도록 dp 를 맞춥니다 (블록 변 길이가 dp 의 정수배가 되도록).</p>
+<table>
+<tr><th>값</th><th>3D</th><th>2D</th></tr>
+<tr><td>평활 길이 h</td><td>√3 · dp ≈ 1.73 dp</td><td>√2 · dp ≈ 1.41 dp</td></tr>
+<tr><td>상호작용 반경 2h</td><td>≈ 3.46 dp</td><td>≈ 2.83 dp</td></tr>
+<tr><td>반경 안 이웃 수</td><td>약 170</td><td>약 25</td></tr>
+<tr><td>입자 질량</td><td>ρ₀ dp³</td><td>ρ₀ dp² (폭 1 mm 당)</td></tr>
+</table>
+<p>화면의 입자는 지름 = dp 인 공으로 그려 서로 맞닿아 보입니다. 하지만 계산에서 입자끼리 힘을 주고받는 거리는 그보다 훨씬 긴 2h 입니다. SPH 는 한 입자의 밀도·압력 기울기를 주변 수십~백여 개 입자의 가중 평균으로 내기 때문에, 상호작용 반경을 입자 크기로 줄이면 이웃이 거의 없어져 계산이 성립하지 않습니다 (그건 입자끼리 부딪히기만 하는 DEM 이 됩니다). DualSPHysics 와 같은 coefh = 1 을 씁니다.</p>
+<p>입자 간격을 반으로 줄이면 입자 수는 3D 8배 · 2D 4배, 시간 간격은 절반이라 계산량은 3D 16배 · 2D 8배가 됩니다. 거칠게 먼저 보고 필요한 경우만 촘촘하게 돌리는 것이 효율적입니다.</p>
+<h3 id="sph-2d">4-6. 2D 모드</h3>
+<p>x-z 평면(지정한 y 위치)에서 계산합니다. 형상은 그 평면으로 자른 단면이 벽이 됩니다. 커널은 2D Wendland (21/16π → 7/4π, h = √2 dp), mDBC 보정 행렬은 3×3 입니다. 폭 방향 효과가 없는 장면(검증용 댐 붕괴, 긴 수로 단면)에서 3D 보다 수십 배 빠릅니다. 하중·질량은 폭 1 mm 당 값입니다.</p>
+<h3 id="sph-speed">4-7. 속도 선택지</h3>
+<table>
+<tr><th>선택</th><th>내용</th><th>효과</th></tr>
+<tr><td>Verlet 적분</td><td>스텝당 힘 계산 1번. vⁿ⁺¹ = vⁿ⁻¹ + 2Δt aⁿ, 40 스텝마다 오일러 1번 (DualSPHysics 기본값)</td><td>약 2배</td></tr>
+<tr><td>음속 계수 10</td><td>c₀ = 10√(gH) (DualSPHysics 하한). Δt 가 2배, 밀도 변동은 약 4배 (1% → 4% 수준)</td><td>약 2배</td></tr>
+<tr><td>항상 켜짐</td><td>입자 셀 순서 재배열, 셀 크기 h, 주변에 물이 없는 경계 입자 건너뛰기, 장치 안에서 Δt 계산 후 여러 스텝 묶어 실행, 재배열 커널 하나로</td><td>CPU 1.3~8배 (작은 장면일수록 큼)</td></tr>
+</table>
+
+<h3 id="sph-out">4-8. 결과 표시</h3>
 <p>출력 시점마다 입자 값을 정해진 격자(약 12만 점)에 Shepard 보간해 단면 색, 단면 벡터, 단면 유선, 와도(격자 중심차분), Q-criterion 등치면을 만듭니다. 프로브는 같은 보간으로 그 점의 속도·압력을 기록하고, 벽 하중은 유체 입자가 경계 입자에게 받는 압력·점성 힘의 반작용 합입니다.</p>
 
 <h2 id="case">5. 케이스 구성</h2>

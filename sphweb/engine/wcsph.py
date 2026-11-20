@@ -26,7 +26,7 @@ def init(arch="cpu", **kw):
 
 @ti.data_oriented
 class Solver:
-    def __init__(self, params: Params, fluid, bound, domain=None, fluid_vel=None, pos64=None, bound_normals=None):
+    def __init__(self, params: Params, fluid, bound, domain=None, fluid_vel=None, pos64=None, bound_normals=None, cell_div=1, batch=64):
         self.p = params
         fluid = np.asarray(fluid, dtype=np.float64).reshape(-1, 3)
         bound = np.asarray(bound, dtype=np.float64).reshape(-1, 3)
@@ -39,8 +39,13 @@ class Solver:
             pad = params.support
             domain = (lo - pad, hi + pad + 0.5 * (hi - lo))
         lo, hi = np.asarray(domain[0], float), np.asarray(domain[1], float)
+        self.dim = int(params.dim)
+        if self.dim == 2:
+            yc = float(allp[:, 1].mean())
+            lo[1], hi[1] = yc - 0.5 * params.support, yc + 0.5 * params.support
         self.origin = lo
-        self.cs = params.support
+        self.cd = int(cell_div)
+        self.cs = params.support / self.cd
         self.dims = np.maximum(np.ceil((hi - lo) / self.cs).astype(int), 1)
         self.ncell = int(np.prod(self.dims))
         self.nscan = self.ncell + 1
@@ -73,6 +78,11 @@ class Solver:
         self.mdbc = bound_normals is not None
         self.rmin = float(params.rho_min)
         self.rmax = float(params.rho_max)
+        self.verlet = params.scheme == "verlet"
+        self.vsteps = int(params.verlet_steps)
+        self.cfl = float(params.cfl)
+        self.dtmin = float(params.dt_min)
+        self.kmax = int(batch)
 
         n = self.n
         self.pos = ti.Vector.field(3, self.pdt, n)
@@ -90,16 +100,21 @@ class Solver:
         self.pid = ti.field(ti.i32, n)
         self.fwall = ti.Vector.field(3, ti.f32, n)
         self.bnor = ti.Vector.field(3, ti.f32, n)
-        self.t_p = ti.Vector.field(3, self.pdt, n)
-        self.t_v = ti.Vector.field(3, ti.f32, n)
-        self.t_s = ti.field(ti.f32, n)
-        self.t_i = ti.field(ti.i32, n)
+        self.g_p = ti.Vector.field(3, self.pdt, (n, 2))
+        self.g_v = ti.Vector.field(3, ti.f32, (n, 3))
+        self.g_s = ti.field(ti.f32, (n, 2))
+        self.g_i = ti.field(ti.i32, (n, 3))
         self.count = ti.field(ti.i32, self.nscan)
         self.start = ti.field(ti.i32, self.nscan + 1)
         self.cursor = ti.field(ti.i32, self.nscan)
         self.bsum = ti.field(ti.i32, self.nblk + 1)
         self.stat = ti.field(ti.f32, 4)
         self.nout = ti.field(ti.i32, ())
+        self.fcount = ti.field(ti.i32, self.nscan)
+        self.wetc = ti.field(ti.i32, self.nscan)
+        self.dtv = ti.field(ti.f32, 4)
+        self.ring = ti.field(ti.f32, self.kmax)
+        self.dthit = ti.field(ti.i32, ())
 
         kind = np.concatenate([np.full(self.nb, BOUND), np.full(self.nf, FLUID)]).astype(np.int32)
         vel = np.zeros((n, 3), np.float32)
@@ -117,7 +132,10 @@ class Solver:
         self.time = 0.0
         self.nstep = 0
         self.dt_pre = float(params.dt_ini)
+        self.dtv[2] = self.dt_pre
         self.dt_last = self.dt_pre
+        self.vcount = 0
+        self.first = True
         self.dt_warn = 0
         self.wall = 0.0
 
@@ -132,6 +150,7 @@ class Solver:
     def _bin(self):
         for c in self.count:
             self.count[c] = 0
+            self.fcount[c] = 0
         for i in self.pos:
             c = self.ncell
             if self.kind[i] != OUT:
@@ -142,6 +161,8 @@ class Solver:
                     self.kind[i] = OUT
             self.cell[i] = c
             ti.atomic_add(self.count[c], 1)
+            if self.kind[i] == FLUID:
+                ti.atomic_add(self.fcount[c], 1)
 
     @ti.kernel
     def _scan(self):
@@ -178,51 +199,41 @@ class Solver:
             a, b = self.start[c], self.start[c + 1]
             for u in range(a + 1, b):
                 v = self.order[u]
+                kv = ti.select(self.kind[v] == FLUID, v, v + self.n)
                 w = u - 1
-                while w >= a and self.order[w] > v:
+                while w >= a and ti.select(self.kind[self.order[w]] == FLUID, self.order[w], self.order[w] + self.n) > kv:
                     self.order[w + 1] = self.order[w]
                     w -= 1
                 self.order[w + 1] = v
 
     @ti.kernel
-    def _gather_p(self, a: ti.template()):
+    def _gather_all(self):
         for s in range(self.n):
-            self.t_p[s] = a[self.order[s]]
+            o = self.order[s]
+            self.g_p[s, 0] = self.pos[o]
+            self.g_p[s, 1] = self.pos_pre[o]
+            self.g_v[s, 0] = self.vel[o]
+            self.g_v[s, 1] = self.vel_pre[o]
+            self.g_v[s, 2] = self.bnor[o]
+            self.g_s[s, 0] = self.rho[o]
+            self.g_s[s, 1] = self.rho_pre[o]
+            self.g_i[s, 0] = self.kind[o]
+            self.g_i[s, 1] = self.pid[o]
+            self.g_i[s, 2] = self.cell[o]
         for s in range(self.n):
-            a[s] = self.t_p[s]
-
-    @ti.kernel
-    def _gather_v(self, a: ti.template()):
-        for s in range(self.n):
-            self.t_v[s] = a[self.order[s]]
-        for s in range(self.n):
-            a[s] = self.t_v[s]
-
-    @ti.kernel
-    def _gather_s(self, a: ti.template()):
-        for s in range(self.n):
-            self.t_s[s] = a[self.order[s]]
-        for s in range(self.n):
-            a[s] = self.t_s[s]
-
-    @ti.kernel
-    def _gather_i(self, a: ti.template()):
-        for s in range(self.n):
-            self.t_i[s] = a[self.order[s]]
-        for s in range(self.n):
-            a[s] = self.t_i[s]
+            self.pos[s] = self.g_p[s, 0]
+            self.pos_pre[s] = self.g_p[s, 1]
+            self.vel[s] = self.g_v[s, 0]
+            self.vel_pre[s] = self.g_v[s, 1]
+            self.bnor[s] = self.g_v[s, 2]
+            self.rho[s] = self.g_s[s, 0]
+            self.rho_pre[s] = self.g_s[s, 1]
+            self.kind[s] = self.g_i[s, 0]
+            self.pid[s] = self.g_i[s, 1]
+            self.cell[s] = self.g_i[s, 2]
 
     def _reorder(self):
-        self._gather_p(self.pos)
-        self._gather_p(self.pos_pre)
-        self._gather_v(self.vel)
-        self._gather_v(self.vel_pre)
-        self._gather_v(self.bnor)
-        self._gather_s(self.rho)
-        self._gather_s(self.rho_pre)
-        self._gather_i(self.kind)
-        self._gather_i(self.pid)
-        self._gather_i(self.cell)
+        self._gather_all()
 
     def hydrostatic(self, zsurf, bound=True):
         z = self.pos.to_numpy()[:, 2].astype(np.float64)
@@ -238,6 +249,7 @@ class Solver:
         self._scatter()
         self._sort_within()
         self._reorder()
+        self._wetcells()
 
     @ti.func
     def _row(self, g, dy: ti.template(), dz: ti.template()):
@@ -245,12 +257,38 @@ class Solver:
         b = 0
         y, z = g[1] + dy, g[2] + dz
         if 0 <= y < self.cy and 0 <= z < self.cz:
-            x0 = ti.max(g[0] - 1, 0)
-            x1 = ti.min(g[0] + 1, self.cx - 1)
-            base = (z * self.cy + y) * self.cx
-            a = self.start[base + x0]
-            b = self.start[base + x1 + 1]
+            x0 = ti.max(g[0] - self.cd, 0)
+            x1 = ti.min(g[0] + self.cd, self.cx - 1)
+            if x0 <= x1:
+                base = (z * self.cy + y) * self.cx
+                a = self.start[base + x0]
+                b = self.start[base + x1 + 1]
         return a, b
+
+    @ti.kernel
+    def _wetcells(self):
+        for c in range(self.ncell):
+            gx = c % self.cx
+            gy = (c // self.cx) % self.cy
+            gz = c // (self.cx * self.cy)
+            n = 0
+            for dz in ti.static(range(-self.cd, self.cd + 1)):
+                for dy in ti.static(range(-self.cd, self.cd + 1)):
+                    y, z = gy + dy, gz + dz
+                    if 0 <= y < self.cy and 0 <= z < self.cz:
+                        base = (z * self.cy + y) * self.cx
+                        for dx in ti.static(range(-self.cd, self.cd + 1)):
+                            x = gx + dx
+                            if 0 <= x < self.cx:
+                                n += self.fcount[base + x]
+            self.wetc[c] = n
+
+    @ti.func
+    def _wet(self, g):
+        n = 0
+        if 0 <= g[0] < self.cx and 0 <= g[1] < self.cy and 0 <= g[2] < self.cz:
+            n = self.wetc[(g[2] * self.cy + g[1]) * self.cx + g[0]]
+        return n
 
     @ti.kernel
     def _count_nb(self, out: ti.types.ndarray()):
@@ -258,8 +296,8 @@ class Solver:
             n = 0
             if self.kind[i] != OUT:
                 g = self.cell_of(self.pos[i])
-                for dz in ti.static(range(-1, 2)):
-                    for dy in ti.static(range(-1, 2)):
+                for dz in ti.static(range(-self.cd, self.cd + 1)):
+                    for dy in ti.static(range(-self.cd, self.cd + 1)):
                         a, b = self._row(g, dy, dz)
                         for j in range(a, b):
                             dr = ti.cast(self.pos[i] - self.pos[j], ti.f32)
@@ -289,8 +327,43 @@ class Solver:
             self.fwall[i] = ti.Vector([0.0, 0.0, 0.0])
         for i in self.pos:
             ki = self.kind[i]
-            if ki != OUT:
+            if ki == FLUID:
                 self._one(i, ki)
+            elif ki == BOUND:
+                if self._wet(self.cell_of(self.pos[i])) > 0:
+                    self._one_bound(i)
+                else:
+                    self.ar[i] = 0.0
+                    self.ace[i] = ti.Vector([0.0, 0.0, 0.0])
+
+    @ti.func
+    def _one_bound(self, i):
+        xi = self.pos[i]
+        vi = self.vel[i]
+        ri = self.rho[i]
+        g = self.cell_of(xi)
+        ar = 0.0
+        visc = 0.0
+        for dz in ti.static(range(-self.cd, self.cd + 1)):
+            for dy in ti.static(range(-self.cd, self.cd + 1)):
+                y, z = g[1] + dy, g[2] + dz
+                if 0 <= y < self.cy and 0 <= z < self.cz:
+                    base = (z * self.cy + y) * self.cx
+                    for x in range(ti.max(g[0] - self.cd, 0), ti.min(g[0] + self.cd, self.cx - 1) + 1):
+                        c = base + x
+                        for j in range(self.start[c], self.start[c] + self.fcount[c]):
+                            dr = ti.cast(xi - self.pos[j], ti.f32)
+                            rr2 = dr.dot(dr)
+                            if rr2 <= self.kr2 and rr2 >= 1e-18:
+                                q = ti.sqrt(rr2) / self.h
+                                w1 = 1.0 - 0.5 * q
+                                fr = self.bwen * w1 * w1 * w1 * dr
+                                dv = vi - self.vel[j]
+                                ar += self.vol * dv.dot(fr) * (ri / self.rho[j])
+                                visc = ti.max(visc, dr.dot(dv) / (rr2 + self.eta2))
+        self.ar[i] = ar
+        self.ace[i] = ti.Vector([0.0, 0.0, 0.0])
+        ti.atomic_max(self.stat[1], visc)
 
     @ti.func
     def _one(self, i, ki):
@@ -304,8 +377,8 @@ class Solver:
         dd = 0.0
         ddt_on = 1
         visc = 0.0
-        for dz in ti.static(range(-1, 2)):
-            for dy in ti.static(range(-1, 2)):
+        for dz in ti.static(range(-self.cd, self.cd + 1)):
+            for dy in ti.static(range(-self.cd, self.cd + 1)):
                 a0, b0 = self._row(g, dy, dz)
                 for j in range(a0, b0):
                     kj = self.kind[j]
@@ -361,28 +434,33 @@ class Solver:
         for i in self.pos:
             if self.kind[i] == BOUND:
                 bn = self.bnor[i]
-                if bn.norm() > 0:
-                    gp = self.pos[i] + ti.cast(bn, self.pdt)
-                    g = self.cell_of(gp)
+                gp = self.pos[i] + ti.cast(bn, self.pdt)
+                g = self.cell_of(gp)
+                if bn.norm() > 0 and self._wet(g) > 0:
                     m = ti.Matrix.zero(ti.f32, 4, 4)
                     rv = ti.Vector.zero(ti.f32, 4)
-                    for dz in ti.static(range(-1, 2)):
-                        for dy in ti.static(range(-1, 2)):
-                            a0, b0 = self._row(g, dy, dz)
-                            for j in range(a0, b0):
-                                if self.kind[j] == FLUID:
-                                    dr = ti.cast(gp - self.pos[j], ti.f32)
-                                    rr2 = dr.dot(dr)
-                                    if rr2 <= self.kr2:
-                                        q = ti.sqrt(rr2) / self.h
-                                        w1 = 1.0 - 0.5 * q
-                                        wab = self.awen * (2.0 * q + 1.0) * w1 * w1 * w1 * w1
-                                        fr = self.bwen * w1 * w1 * w1 * dr
-                                        vj = self.vol / self.rho[j]
-                                        rv += ti.Vector([wab, fr[0], fr[1], fr[2]]) * self.vol
-                                        row = ti.Vector([1.0, dr[0], dr[1], dr[2]])
-                                        col = ti.Vector([wab, fr[0], fr[1], fr[2]]) * vj
-                                        m += col.outer_product(row)
+                    for dz in ti.static(range(-self.cd, self.cd + 1)):
+                        for dy in ti.static(range(-self.cd, self.cd + 1)):
+                            y, z = g[1] + dy, g[2] + dz
+                            if 0 <= y < self.cy and 0 <= z < self.cz:
+                                base = (z * self.cy + y) * self.cx
+                                for x in range(ti.max(g[0] - self.cd, 0), ti.min(g[0] + self.cd, self.cx - 1) + 1):
+                                    c = base + x
+                                    for j in range(self.start[c], self.start[c] + self.fcount[c]):
+                                        dr = ti.cast(gp - self.pos[j], ti.f32)
+                                        rr2 = dr.dot(dr)
+                                        if rr2 <= self.kr2:
+                                            q = ti.sqrt(rr2) / self.h
+                                            w1 = 1.0 - 0.5 * q
+                                            wab = self.awen * (2.0 * q + 1.0) * w1 * w1 * w1 * w1
+                                            fr = self.bwen * w1 * w1 * w1 * dr
+                                            vj = self.vol / self.rho[j]
+                                            rv += ti.Vector([wab, fr[0], fr[1], fr[2]]) * self.vol
+                                            row = ti.Vector([1.0, dr[0], dr[1], dr[2]])
+                                            col = ti.Vector([wab, fr[0], fr[1], fr[2]]) * vj
+                                            m += col.outer_product(row)
+                    if ti.static(self.dim == 2):
+                        m[2, 2] = 1.0
                     rf = 1.0
                     det = m.determinant()
                     if ti.abs(det) >= 1e-3:
@@ -401,7 +479,30 @@ class Solver:
             self.rho_pre[i] = self.rho[i]
 
     @ti.kernel
-    def _predict(self, dt: ti.f32):
+    def _dtk(self, slot: ti.i32):
+        acemax = self.stat[0]
+        viscmax = self.stat[1]
+        velmax = self.stat[2]
+        dt1 = 1e30
+        if acemax > 0:
+            dt1 = ti.sqrt(self.h / acemax)
+        dt2 = self.h / (ti.max(self.cs0, 10.0 * velmax) + self.h * viscmax)
+        dt = self.cfl * ti.min(dt1, dt2)
+        if dt < self.dtmin:
+            dt = self.dtmin
+            self.dthit[None] += 1
+        if ti.math.isnan(dt):
+            dt = -1.0
+        self.dtv[slot] = dt
+
+    @ti.kernel
+    def _sym_end(self, k: ti.i32):
+        self.ring[k] = self.dtv[2]
+        self.dtv[2] = ti.min(self.dtv[0], self.dtv[1])
+
+    @ti.kernel
+    def _predict(self):
+        dt = self.dtv[2]
         h = 0.5 * dt
         for i in self.pos:
             k = self.kind[i]
@@ -414,7 +515,8 @@ class Solver:
                 self._check(i)
 
     @ti.kernel
-    def _correct(self, dt: ti.f32):
+    def _correct(self):
+        dt = self.dtv[2]
         h = 0.5 * dt
         for i in self.pos:
             k = self.kind[i]
@@ -430,6 +532,33 @@ class Solver:
                     self.vel[i] = vn
                     self._check(i)
 
+    @ti.kernel
+    def _verlet(self, k: ti.i32, euler: ti.i32):
+        dt = self.dtv[0]
+        self.ring[k] = dt
+        d2 = ti.select(euler == 1, dt, 2.0 * dt)
+        g = ti.Vector([self.gx, self.gy, self.gz])
+        for i in self.pos:
+            kk = self.kind[i]
+            if kk == BOUND:
+                base = ti.select(euler == 1, self.rho[i], self.rho_pre[i])
+                rn = ti.max(1.0, base + d2 * self.ar[i])
+                self.rho_pre[i] = self.rho[i]
+                self.rho[i] = rn
+            elif kk == FLUID:
+                a = self.ace[i] + g
+                vb = self.vel[i]
+                rb = self.rho[i]
+                if euler == 0:
+                    vb = self.vel_pre[i]
+                    rb = self.rho_pre[i]
+                self.pos[i] = self.pos[i] + ti.cast(self.vel[i] * dt + 0.5 * dt * dt * a, self.pdt)
+                self.vel_pre[i] = self.vel[i]
+                self.rho_pre[i] = self.rho[i]
+                self.vel[i] = vb + d2 * a
+                self.rho[i] = rb + d2 * self.ar[i]
+                self._check(i)
+
     @ti.func
     def _check(self, i):
         r = self.rho[i]
@@ -439,42 +568,62 @@ class Solver:
             self.ace[i] = ti.Vector([0.0, 0.0, 0.0])
             self.nout[None] += 1
 
-    def _dt(self):
-        s = self.stat.to_numpy()
-        p = self.p
-        acemax, viscmax, velmax = float(s[0]), float(s[1]), float(s[2])
-        dt1 = math.sqrt(p.h / acemax) if acemax > 0 else math.inf
-        dt2 = p.h / (max(p.cs0, 10.0 * velmax) + p.h * viscmax)
-        dt = p.cfl * min(dt1, dt2)
-        if not math.isfinite(dt):
-            raise FloatingPointError(f"dt 계산 실패 (acemax={acemax}, velmax={velmax}, visc={viscmax})")
-        if dt < p.dt_min:
-            dt = p.dt_min
-            self.dt_warn += 1
-        return dt
+    def _one_step(self, k):
+        if self.verlet:
+            if self.first:
+                self._save_pre()
+                self.first = False
+            self.neighbors()
+            if self.mdbc:
+                self._mdbc()
+            self._eos()
+            self._interact()
+            self._dtk(0)
+            self.vcount += 1
+            euler = 1 if self.vcount >= self.vsteps else 0
+            if euler:
+                self.vcount = 0
+            self._verlet(k, euler)
+        else:
+            self.neighbors()
+            if self.mdbc:
+                self._mdbc()
+            self._save_pre()
+            self._eos()
+            self._interact()
+            self._dtk(0)
+            self._predict()
+            self.neighbors()
+            self._eos()
+            self._interact()
+            self._dtk(1)
+            self._correct()
+            self._sym_end(k)
+
+    def advance(self, nsteps=1):
+        t0 = time.perf_counter()
+        n = max(1, min(int(nsteps), self.kmax))
+        for k in range(n):
+            self._one_step(k)
+        dts = self.ring.to_numpy()[:n].astype(np.float64)
+        if not np.all(np.isfinite(dts)) or np.any(dts <= 0):
+            raise FloatingPointError("dt 계산 실패 (발산)")
+        self.time += float(dts.sum())
+        self.nstep += n
+        self.dt_last = float(dts[-1])
+        self.dt_pre = float(self.dtv[2]) if not self.verlet else self.dt_last
+        self.dt_warn = int(self.dthit[None])
+        self.wall += time.perf_counter() - t0
+        return n
 
     def step(self):
-        t0 = time.perf_counter()
-        dt = self.dt_pre
-        self.neighbors()
-        if self.mdbc:
-            self._mdbc()
-        self._save_pre()
-        self._eos()
-        self._interact()
-        dtp = self._dt()
-        self._predict(dt)
-        self.neighbors()
-        self._eos()
-        self._interact()
-        dtc = self._dt()
-        self._correct(dt)
-        self.dt_pre = min(dtp, dtc)
-        self.dt_last = dt
-        self.time += dt
-        self.nstep += 1
-        self.wall += time.perf_counter() - t0
-        return dt
+        self.advance(1)
+        return self.dt_last
+
+    def steps_until(self, t_target, cap=None):
+        dt = max(self.dt_last, 1e-30)
+        k = int((t_target - self.time) / dt)
+        return max(1, min(k, cap or self.kmax))
 
     @ti.kernel
     def _sample(self, pts: ti.types.ndarray(), out: ti.types.ndarray()):
@@ -484,8 +633,8 @@ class Solver:
             den = 0.0
             u = ti.Vector([0.0, 0.0, 0.0])
             pr = 0.0
-            for dz in ti.static(range(-1, 2)):
-                for dy in ti.static(range(-1, 2)):
+            for dz in ti.static(range(-self.cd, self.cd + 1)):
+                for dy in ti.static(range(-self.cd, self.cd + 1)):
                     a0, b0 = self._row(g, dy, dz)
                     for j in range(a0, b0):
                         if self.kind[j] == FLUID:
@@ -527,7 +676,7 @@ class Solver:
     def run(self, t_end, every=None, callback=None):
         nxt = every if every else math.inf
         while self.time < t_end - 1e-12:
-            self.step()
+            self.advance(self.steps_until(min(nxt, t_end)))
             if callback and self.time >= nxt - 1e-12:
                 nxt += every
                 if callback(self) is False:

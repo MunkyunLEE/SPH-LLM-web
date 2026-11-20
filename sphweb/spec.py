@@ -30,8 +30,10 @@ def default_spec(geom=None):
         "domain": dom,
         "fluid": {"preset": "water", "name": f["name"], "rho0": f["rho"], "mu": f["mu"]},
         "particle": {"dx": dx},
+        "dim": 3,
+        "plane_y": float(np.round(0.5 * (dom["min"][1] + dom["max"][1]), 3)),
         "gravity": [0.0, 0.0, -units.G],
-        "solver": {"method": "wcsph", "t_end": 2.0, "fps": 30, "cfl": 0.2, "viscosity": "artificial", "alpha": 0.02, "boundary": "mdbc", "ddt": 0.1},
+        "solver": {"method": "wcsph", "t_end": 2.0, "fps": 30, "cfl": 0.2, "viscosity": "artificial", "alpha": 0.02, "boundary": "mdbc", "ddt": 0.1, "scheme": "symplectic", "coefsound": 20.0},
         "device": "auto",
         "bodies": bodies,
         "fluid_blocks": [],
@@ -155,8 +157,24 @@ def apply_ops(spec, ops, geom=None):
                     spec["fluid"]["name"] = "직접 입력"
             log.append(f"유체: {spec['fluid']['name']} (ρ₀ {spec['fluid']['rho0']:.4g} tonne/mm³, μ {spec['fluid']['mu']:.4g} MPa·s)")
         elif op == "set_particle":
-            spec["particle"]["dx"] = _pos(o["dx"], "입자 간격")
-            log.append(f"입자 간격 {spec['particle']['dx']:g} mm")
+            if o.get("count") is not None:
+                n = _pos(o["count"], "입자 수")
+                vol = fluid_measure(spec)
+                if vol <= 0:
+                    raise ValueError("입자 수로 정하려면 먼저 유체 블록이 있어야 합니다")
+                spec["particle"]["dx"] = fit_dx(spec, (vol / n) ** (1.0 / spec.get("dim", 3)), n)
+                log.append(f"유체 입자 약 {int(n):,}개 → 입자 간격 {spec['particle']['dx']:g} mm")
+            else:
+                spec["particle"]["dx"] = _pos(o["dx"], "입자 간격")
+                log.append(f"입자 간격 {spec['particle']['dx']:g} mm")
+        elif op == "set_dim":
+            d = int(o.get("dim", 3))
+            if d not in (2, 3):
+                raise ValueError("차원은 2 또는 3 입니다")
+            spec["dim"] = d
+            if o.get("plane_y") is not None:
+                spec["plane_y"] = float(o["plane_y"])
+            log.append("2D 해석 (x-z 평면, y = %g mm)" % spec.get("plane_y", 0.0) if d == 2 else "3D 해석")
         elif op == "set_solver":
             s = spec["solver"]
             for k in ("t_end", "cfl", "alpha"):
@@ -176,6 +194,14 @@ def apply_ops(spec, ops, geom=None):
                 if o["viscosity"] not in ("artificial", "laminar"):
                     raise ValueError("점성은 artificial (인공 점성) 또는 laminar (층류) 입니다")
                 s["viscosity"] = o["viscosity"]
+            if o.get("scheme") is not None:
+                if o["scheme"] not in ("symplectic", "verlet"):
+                    raise ValueError("시간 적분은 symplectic 또는 verlet 입니다")
+                s["scheme"] = o["scheme"]
+            if o.get("coefsound") is not None:
+                s["coefsound"] = float(o["coefsound"])
+                if not 10.0 <= s["coefsound"] <= 40.0:
+                    raise ValueError("음속 계수는 10 ~ 40 입니다 (DualSPHysics 하한 10)")
             if o.get("boundary") is not None:
                 if o["boundary"] not in ("dbc", "mdbc"):
                     raise ValueError("경계 조건은 dbc 또는 mdbc 입니다")
@@ -290,22 +316,65 @@ def _content_box(spec, geom):
     return p.min(axis=0), p.max(axis=0)
 
 
-def block_count(box, dx):
+def block_count(box, dx, dim=3, plane_y=None):
     n = np.floor((np.array(box["max"]) - np.array(box["min"])) / dx + 1e-9).astype(int)
+    if dim == 2:
+        if plane_y is not None and not box["min"][1] <= plane_y <= box["max"][1]:
+            return 0
+        return int(max(n[0], 0) * max(n[2], 0))
     return int(np.prod(np.maximum(n, 0)))
+
+
+def fluid_measure(spec):
+    dim = spec.get("dim", 3)
+    out = 0.0
+    for b in spec["fluid_blocks"]:
+        sz = np.maximum(np.array(b["box"]["max"]) - np.array(b["box"]["min"]), 0)
+        if dim == 2:
+            if b["box"]["min"][1] <= spec.get("plane_y", 0.0) <= b["box"]["max"][1]:
+                out += sz[0] * sz[2]
+        else:
+            out += float(np.prod(sz))
+    return out
+
+
+def fit_dx(spec, dx0, n=None):
+    if not spec["fluid_blocks"]:
+        return float(np.round(dx0, 3))
+    axes = [0, 2] if spec.get("dim", 3) == 2 else [0, 1, 2]
+    big = max(spec["fluid_blocks"], key=lambda b: np.prod(np.maximum(np.array(b["box"]["max"]) - np.array(b["box"]["min"]), 1e-9)[axes]))
+    size = (np.array(big["box"]["max"]) - np.array(big["box"]["min"]))[axes]
+    best, score = dx0, np.inf
+    for a in range(len(axes)):
+        k0 = size[a] / dx0
+        for k in range(max(1, int(k0) - 3), int(k0) + 4):
+            dx = size[a] / k
+            frac = size / dx - np.floor(size / dx + 1e-9)
+            gap = float(np.sum(np.minimum(frac, 1 - frac)))
+            cnt = float(np.prod(np.floor(size / dx + 1e-9)))
+            dev = abs(cnt - n) / n if n else abs(dx - dx0) / dx0
+            sc = gap + 4.0 * dev
+            if sc < score:
+                best, score = dx, sc
+    return float(np.round(best, 4))
 
 
 def estimate(spec):
     dx = spec["particle"]["dx"]
-    fill = sum(block_count(b["box"], dx) for b in spec["fluid_blocks"])
+    dim = spec.get("dim", 3)
+    fill = sum(block_count(b["box"], dx, dim, spec.get("plane_y")) for b in spec["fluid_blocks"])
     t_end = spec["solver"]["t_end"]
     emit = 0
     for it in spec["inlets"]:
         area = it["size"][0] * it["size"][1] * (np.pi / 4 if it["shape"] == "circle" else 1.0)
         dur = max((it["t_end"] if it["t_end"] is not None else t_end) - it["t_start"], 0.0)
         emit += int(area / dx**2 * it["speed"] * dur / dx)
-    mass = spec["fluid"]["rho0"] * dx**3
-    return {"fill": fill, "emitted": emit, "total": fill + emit, "particle_mass": mass, "support_radius": 2.0 * dx}
+    if dim == 2:
+        emit = 0
+    mass = spec["fluid"]["rho0"] * dx**dim
+    h = (dim ** 0.5) * dx
+    nb = (np.pi * 4 * h * h if dim == 2 else 4.0 / 3.0 * np.pi * 8 * h**3) / dx**dim
+    return {"fill": fill, "emitted": emit, "total": fill + emit, "particle_mass": mass, "support_radius": 2.0 * h, "neighbors": int(round(nb)), "dim": dim}
 
 
 def warnings_for(spec, geom=None):
@@ -322,6 +391,15 @@ def warnings_for(spec, geom=None):
     e = estimate(spec)
     if e["total"] > MAX_PARTICLES:
         out.append({"level": "err", "text": f"예상 입자 수 {e['total']:,}개가 상한 {MAX_PARTICLES:,}개를 넘습니다. 입자 간격을 키우세요"})
+    dx = spec["particle"]["dx"]
+    for b in spec["fluid_blocks"]:
+        sz = np.array(b["box"]["max"]) - np.array(b["box"]["min"])
+        axes = [0, 2] if spec.get("dim", 3) == 2 else [0, 1, 2]
+        k = float(np.min(sz[axes]) / dx)
+        if k < 4:
+            out.append({"level": "warn", "text": f"{b['id']} 의 가장 짧은 변에 입자가 {k:.0f}개뿐입니다. 상호작용 반경(2h ≈ {2 * (len(axes) ** 0.5):.1f}dx)보다 작아 결과를 믿기 어렵습니다. 입자 수를 늘리세요"})
+        elif k < 8:
+            out.append({"level": "info", "text": f"{b['id']} 의 가장 짧은 변에 입자 {k:.0f}개. 훑어보기용 해상도입니다 (정합 시험상 2D 댐 붕괴는 짧은 변 25개에서도 90% 이상)"})
     if not spec["fluid_blocks"] and not spec["inlets"]:
         out.append({"level": "info", "text": "유체가 없습니다. 유체 블록이나 유입구를 추가하세요"})
     if geom is not None:

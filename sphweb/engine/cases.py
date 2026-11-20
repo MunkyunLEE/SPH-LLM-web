@@ -51,3 +51,34 @@ def dam_break(length, width, height, col_l, col_h, dp, layers=1, normals=False):
     if normals:
         return fluid.astype(float), bound, r[2]
     return fluid.astype(float), bound
+
+
+def tank2d(length, height, depth, dp, layers=4, normals=True):
+    nx, nz = int(round(length / dp)), int(round(height / dp))
+    I, K = np.meshgrid(np.arange(-(layers - 1), nx + layers), np.arange(-(layers - 1), nz + 1), indexing="ij")
+    wall = (I <= 0) | (I >= nx) | (K <= 0)
+    idx = np.stack([I[wall], np.zeros(wall.sum()), K[wall]], 1).astype(float)
+    g = idx.copy()
+    lo = idx[:, 0] <= 0
+    g[lo, 0] = 1.0 - idx[lo, 0]
+    hi = idx[:, 0] >= nx
+    g[hi, 0] = 2 * nx - 1.0 - idx[hi, 0]
+    bt = idx[:, 2] <= 0
+    g[bt, 2] = 1.0 - idx[bt, 2]
+    nd = int(np.floor(depth / dp + 1e-6))
+    fi, fk = np.meshgrid(np.arange(1, nx), np.arange(1, nd + 1), indexing="ij")
+    fluid = np.stack([fi.ravel(), np.zeros(fi.size), fk.ravel()], 1) * dp
+    if normals:
+        return fluid, idx * dp, (g - idx) * dp
+    return fluid, idx * dp
+
+
+def dam_break2d(length, height, col_l, col_h, dp, layers=4, normals=True):
+    r = tank2d(length, height, 0.0, dp, layers, True)
+    nx = int(round(col_l / dp))
+    nh = int(np.floor(col_h / dp + 1e-6))
+    fi, fk = np.meshgrid(np.arange(1, nx + 1), np.arange(1, nh + 1), indexing="ij")
+    fluid = np.stack([fi.ravel(), np.zeros(fi.size), fk.ravel()], 1) * dp
+    if normals:
+        return fluid, r[1], r[2]
+    return fluid, r[1]

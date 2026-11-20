@@ -11,6 +11,8 @@ let lastGeo = '';
 const V = createViewer($('gl'), $('gizmo'));
 const gSym = V.group('symbols');
 const gPrev = V.group('preview');
+const gSec = V.group('section');
+let lastDim = 0;
 
 function note(msg, err) {
   const m = $('solveMsg');
@@ -62,7 +64,16 @@ function renderControls() {
   ['dx0', 'dy0', 'dz0'].forEach((id, k) => setNum(id, s.domain.min[k]));
   ['dx1', 'dy1', 'dz1'].forEach((id, k) => setNum(id, s.domain.max[k]));
   const e = st.estimate;
-  $('estimate').textContent = `예상 입자 ${e.total.toLocaleString()}개 (초기 ${e.fill.toLocaleString()} + 유입 ${e.emitted.toLocaleString()}) · 입자 질량 ${fmt(e.particle_mass)} tonne · 커널 반경 ${fmt(e.support_radius)} mm`;
+  $('estimate').textContent = `예상 유체 입자 ${e.total.toLocaleString()}개${e.emitted ? ` (초기 ${e.fill.toLocaleString()} + 유입 ${e.emitted.toLocaleString()})` : ''} · ${e.dim === 2 ? '2D' : '3D'}\n상호작용 반경 2h = ${fmt(e.support_radius)} mm (입자 간격의 ${fmt(e.support_radius / s.particle.dx)}배, 이웃 약 ${e.neighbors}개, 미리보기의 노란 원)\n입자 질량 ${fmt(e.particle_mass)} tonne${e.dim === 2 ? '/mm (폭 1 mm 당)' : ''}`;
+  if (document.activeElement !== $('pcount')) $('pcount').value = e.fill || '';
+  $('scheme').value = s.solver.scheme || 'symplectic';
+  $('coefsound').value = String(s.solver.coefsound || 20);
+  const d2 = (s.dim || 3) === 2;
+  $('dim2').classList.toggle('on', d2);
+  $('dim3').classList.toggle('on', !d2);
+  $('planeLab').hidden = !d2;
+  setNum('planeY', s.plane_y);
+  for (const id of ['slX', 'slZ', 'showIso', 'qLevel']) if ($(id)) $(id).disabled = d2;
   $('undo').disabled = !st.can_undo;
   if (st.model) {
     const m = st.model;
@@ -214,11 +225,82 @@ async function buildPreview() {
   V.clear(gPrev);
   if (!$('showPreview').checked || !st.spec.fluid_blocks.length) return;
   const p = await api('/api/preview');
-  if (p.points.length) gPrev.add(V.points(p.points.flat(), null, 3));
+  if (p.points.length) {
+    gPrev.add(V.points(p.points.flat(), null, p.dx * p.step * (+$('pscale').value || 1), { world: true, color: 0x4cc2ff }));
+    const e = p.estimate;
+    const c = p.points[Math.floor(p.points.length / 2)];
+    const r = e.support_radius;
+    const ring = (axis) => {
+      const pts = [];
+      for (let k = 0; k <= 64; k++) {
+        const a = (k / 64) * Math.PI * 2;
+        const u = r * Math.cos(a);
+        const v = r * Math.sin(a);
+        pts.push(new THREE.Vector3(c[0] + (axis === 'z' ? u : axis === 'y' ? u : 0), c[1] + (axis === 'z' ? v : axis === 'x' ? u : 0), c[2] + (axis === 'z' ? 0 : v)));
+      }
+      return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xffc857, depthTest: false }));
+    };
+    for (const a of e.dim === 2 ? ['y'] : ['x', 'y', 'z']) gPrev.add(ring(a));
+    const dot = V.points(c, [1, 0.78, 0.34], p.dx * 1.05, { world: true });
+    dot.renderOrder = 6;
+    gPrev.add(dot);
+  }
+}
+
+function buildSection() {
+  V.clear(gSec);
+  const s = st.spec;
+  if ((s.dim || 3) !== 2) return;
+  const y = s.plane_y;
+  const lo = s.domain.min;
+  const hi = s.domain.max;
+  const rect = [[lo[0], y, lo[2]], [hi[0], y, lo[2]], [hi[0], y, hi[2]], [lo[0], y, hi[2]]];
+  const g = new THREE.BufferGeometry().setFromPoints(rect.map((p) => new THREE.Vector3(...p)));
+  g.setIndex([0, 1, 2, 0, 2, 3]);
+  const plane = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x4cc2ff, transparent: true, opacity: 0.06, side: THREE.DoubleSide, depthWrite: false }));
+  gSec.add(plane);
+  if (!st.model || !st.view) return;
+  const N = st.view.nodes;
+  const seg = [];
+  for (const t of st.view.tris) {
+    const P = t.map((i) => N[i]);
+    const d = P.map((p) => p[1] - y);
+    const cut = [];
+    for (let k = 0; k < 3; k++) {
+      const a = k;
+      const b = (k + 1) % 3;
+      if ((d[a] > 0) !== (d[b] > 0)) {
+        const u = d[a] / (d[a] - d[b]);
+        cut.push([P[a][0] + u * (P[b][0] - P[a][0]), y, P[a][2] + u * (P[b][2] - P[a][2])]);
+      }
+    }
+    if (cut.length === 2) seg.push(...cut[0], ...cut[1]);
+  }
+  if (seg.length) {
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(seg), 3));
+    gSec.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0xffc857 })));
+  }
+}
+
+function applyDimView(force) {
+  const d2 = (st.spec.dim || 3) === 2;
+  if (!force && (d2 ? 2 : 3) === lastDim) return;
+  lastDim = d2 ? 2 : 3;
+  const [lo, hi] = sceneBox();
+  if (d2) V.planar(true, lo, hi);
+  else {
+    V.planar(false);
+    V.fitBox(lo, hi);
+  }
 }
 
 function applyVisibility() {
+  const d2 = (st.spec.dim || 3) === 2;
   V.group('model').visible = $('showModel').checked;
+  V.group('model').traverse((o) => {
+    if (o.material && o.material.opacity !== undefined && o.isMesh) o.material.opacity = d2 ? 0.12 : 0.35;
+  });
   V.group('edges').visible = $('showModel').checked && $('showEdges').checked;
   gSym.visible = $('showSymbols').checked;
   gPrev.visible = $('showPreview').checked && !document.body.classList.contains('has-result');
@@ -241,6 +323,7 @@ async function refresh(s) {
   if (st.view === undefined && prev) st.view = prev.view;
   renderControls();
   const key = st.model ? `${st.model.source}|${st.model.counts.vertices}|${st.model.counts.faces}` : '';
+  const changed = key !== lastGeo || !prev;
   if (key !== lastGeo) {
     lastGeo = key;
     V.drawGeometry(st.model ? st.view : null, { opacity: 0.35 });
@@ -252,6 +335,8 @@ async function refresh(s) {
   }
   renderLists();
   buildSymbols();
+  buildSection();
+  applyDimView(changed);
   await buildPreview();
   applyVisibility();
 }
@@ -309,6 +394,20 @@ function bind() {
   $('mu').onchange = (e) => ops([{ op: 'set_fluid', mu: +e.target.value }]);
   $('dx').onchange = (e) => ops([{ op: 'set_particle', dx: +e.target.value }]);
   $('boundary').onchange = (e) => ops([{ op: 'set_solver', boundary: e.target.value }]);
+  $('scheme').onchange = (e) => ops([{ op: 'set_solver', scheme: e.target.value }]);
+  $('coefsound').onchange = (e) => ops([{ op: 'set_solver', coefsound: +e.target.value }]);
+  $('pcount').onchange = (e) => +e.target.value > 0 && ops([{ op: 'set_particle', count: +e.target.value }]);
+  $('pquick').onchange = (e) => {
+    if (+e.target.value > 0) ops([{ op: 'set_particle', count: +e.target.value }]);
+    e.target.value = '';
+  };
+  $('dim2').onclick = () => ops([{ op: 'set_dim', dim: 2 }]).then(() => applyDimView(true));
+  $('dim3').onclick = () => ops([{ op: 'set_dim', dim: 3 }]).then(() => applyDimView(true));
+  $('planeY').onchange = (e) => ops([{ op: 'set_dim', dim: 2, plane_y: +e.target.value }]);
+  $('pscale').oninput = () => {
+    buildPreview().then(applyVisibility);
+    window.dispatchEvent(new Event('sph-pscale'));
+  };
   $('viscosity').onchange = (e) => ops([{ op: 'set_solver', viscosity: e.target.value }]);
   $('alpha').onchange = (e) => ops([{ op: 'set_solver', alpha: +e.target.value }]);
   $('prAdd').onclick = () => {

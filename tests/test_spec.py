@@ -53,3 +53,14 @@ def test_replace_spec_roundtrip():
     s, _ = S.apply_ops(S.default_spec(), [{"op": "set_particle", "dx": 7}, {"op": "add_outlet", "box": {"min": [0, 0, -10], "max": [1, 1, 0]}}])
     t, _ = S.apply_ops(S.default_spec(), [{"op": "replace_spec", "spec": s}])
     assert t == s
+
+
+def test_particle_count_fits_block():
+    sp = S.default_spec()
+    sp, _ = S.apply_ops(sp, [{"op": "add_fluid_block", "box": {"min": [0, 0, 0], "max": [400, 600, 300]}}, {"op": "set_particle", "count": 72000}])
+    assert sp["particle"]["dx"] == 10.0
+    assert S.estimate(sp)["fill"] == 72000
+    sp, _ = S.apply_ops(sp, [{"op": "set_dim", "dim": 2, "plane_y": 300}, {"op": "set_particle", "count": 1200}])
+    e = S.estimate(sp)
+    assert e["dim"] == 2 and abs(e["fill"] - 1200) / 1200 < 0.15
+    assert e["support_radius"] == pytest.approx(2 * 2 ** 0.5 * sp["particle"]["dx"])

@@ -16,7 +16,7 @@ export function mountResults(V, opt) {
     field: $('field').value,
     range: $('rangeMode').value,
     part: $('showPart').checked,
-    psize: +$('psize').value || 3,
+    psize: +$('pscale').value || 1,
     slices: 'XYZ'.split('').filter((P) => $(`sl${P}`).checked).map((P) => [P, +$(`sl${P}v`).value / 1000]),
     vec: $('showVec').checked,
     stride: Math.max(1, +$('vecStride').value || 2),
@@ -118,7 +118,8 @@ export function mountResults(V, opt) {
       R.fixed = { field: v.field, r: [lo, hi] };
     }
     if (v.part) {
-      const pts = V.points(fr.pos, F.colorize(pv, v.field, lo, hi), v.psize);
+      const dp = (R.run && R.run.params && R.run.params.dp) || 10;
+      const pts = V.points(fr.pos, F.colorize(pv, v.field, lo, hi), dp * v.psize, { world: true });
       if (v.slices.length) {
         pts.material.transparent = true;
         pts.material.opacity = 0.25;
@@ -207,8 +208,8 @@ export function mountResults(V, opt) {
     const s = r.series || {};
     const last = (k) => (s[k] && s[k].length ? s[k][s[k].length - 1] : null);
     const lines_ = [r.message];
-    if (r.n) lines_.push(`유체 ${r.n.toLocaleString()} · 경계 ${r.nbound.toLocaleString()} 입자 · ${p.boundary || ''} · ${p.viscosity || ''} · 장치 ${r.device}`);
-    if (p.h) lines_.push(`h ${fmt(p.h)} mm · 음속 ${fmt(p.cs0 / 1000)} m/s · 출력 ${r.frames} 프레임`);
+    if (r.n) lines_.push(`${p.dim === 2 ? '2D' : '3D'} · 유체 ${r.n.toLocaleString()} · 경계 ${r.nbound.toLocaleString()} 입자 · ${p.boundary || ''} · ${p.scheme || ''} · 음속 계수 ${p.coefsound || ''} · ${p.viscosity || ''} · 장치 ${r.device}`);
+    if (p.h) lines_.push(`입자 간격 ${fmt(p.dp)} mm · 상호작용 반경 2h ${fmt(2 * p.h)} mm (이웃 약 ${p.neighbors}개) · 음속 ${fmt(p.cs0 / 1000)} m/s · 출력 ${r.frames} 프레임`);
     if (last('density.error.max') !== null) lines_.push(`밀도 오차 평균 ${(100 * last('density.error.mean')).toFixed(2)}% · 최대 ${(100 * last('density.error.max')).toFixed(2)}%`);
     for (const w of r.warnings || []) lines_.push(`⚠ ${w}`);
     $('summary').textContent = lines_.filter(Boolean).join('\n');
@@ -281,8 +282,9 @@ export function mountResults(V, opt) {
     }
   };
   const redraw = () => draw();
-  for (const id of ['field', 'rangeMode', 'showPart', 'psize', 'showVec', 'vecStride', 'showStream', 'streamPlane', 'streamDens', 'showIso', 'qLevel', 'slX', 'slY', 'slZ']) $(id).onchange = redraw;
+  for (const id of ['field', 'rangeMode', 'showPart', 'showVec', 'vecStride', 'showStream', 'streamPlane', 'streamDens', 'showIso', 'qLevel', 'slX', 'slY', 'slZ']) $(id).onchange = redraw;
   for (const P of 'XYZ') $(`sl${P}v`).oninput = redraw;
+  window.addEventListener('sph-pscale', redraw);
   $('field').innerHTML = Object.entries(F.FIELDS).map(([k, m]) => `<option value="${k}">${m.label}</option>`).join('');
   poll();
   return { R, draw, poll };

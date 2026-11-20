@@ -9,3 +9,10 @@
 .slicerow{display:grid;grid-template-columns:90px 1fr;align-items:center;gap:8px}
 .slicerow label.check{padding:0}
 #summary{white-space:pre-wrap;font-size:12px;color:var(--text);padding:10px 14px}
+#dimbar{position:absolute;left:12px;top:10px;display:flex;gap:4px;align-items:center;background:rgba(21,26,34,.88);border:1px solid var(--line);border-radius:var(--r);padding:4px}
+#dimbar button{width:auto;padding:4px 12px;font-weight:600}
+#dimbar button.on{background:var(--accent);border-color:var(--accent);color:#04121c}
+#dimbar label{flex-direction:row;align-items:center;gap:6px;font-size:12px;color:var(--text);margin-left:6px}
+#dimbar input{width:80px;padding:3px 6px}
+#hud{top:52px}
+#viewbar input[type=range]{width:90px}

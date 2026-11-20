@@ -11,8 +11,10 @@ Z is up unless the user says otherwise. Words: 아래/바닥 = -z, 위/상단 = 
 OPS:
  {"op":"set_fluid","preset":"water"|"air"|"oil"} or {"op":"set_fluid","rho0":tonne/mm3,"mu":MPa·s}
  {"op":"set_particle","dx":mm}   particle spacing (resolution)
+ {"op":"set_dim","dim":2|3,"plane_y":mm} (2D = x-z plane at y)
+ {"op":"set_particle","count":N} (target fluid particle count; spacing fitted to fill blocks)
  {"op":"add_probe","point":[x,y,z],"name":str} (time series of speed and pressure at a point)
- {"op":"set_solver","t_end":s,"fps":int,"cfl":0..1 (DualSPHysics 0.2),"alpha":artificial viscosity (0.01~0.1),"viscosity":"artificial"|"laminar","boundary":"mdbc"|"dbc","ddt":density diffusion 0.1}
+ {"op":"set_solver","t_end":s,"fps":int,"cfl":0..1 (DualSPHysics 0.2),"alpha":artificial viscosity (0.01~0.1),"viscosity":"artificial"|"laminar","boundary":"mdbc"|"dbc","ddt":density diffusion 0.1,"scheme":"symplectic"|"verlet","coefsound":10..40}
  {"op":"set_device","device":"auto"|"cuda"|"metal"|"vulkan"|"cpu"}
  {"op":"set_gravity","vector":[gx,gy,gz]}   mm/s2
  {"op":"set_domain","min":[x,y,z],"max":[x,y,z]} or {"op":"set_domain","fit":true,"margin":mm}   particles leaving the domain are removed

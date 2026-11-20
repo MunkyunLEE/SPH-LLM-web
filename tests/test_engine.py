@@ -89,3 +89,57 @@ def test_hydrostatic_short_stays_stable(pos64):
     assert np.isfinite(d["press"]).all()
     assert np.linalg.norm(d["vel"], axis=1).max() < 200.0
     assert d["pos"][:, 2].min() > 0.0
+
+
+def test_kernel_2d_normalization_and_constants():
+    p = Params(dp=0.01, hswl=2.0, rho0=1000.0, gravity=(0, 0, -9.81), dim=2)
+    assert p.h == pytest.approx(0.0141421356, rel=1e-6)
+    assert p.awen * p.h ** 2 == pytest.approx(0.557, rel=1e-3)
+    assert p.bwen * p.h ** 4 == pytest.approx(-2.7852, rel=1e-3)
+    q = Params(dp=1.0, hswl=1.0, dim=2)
+    g = np.arange(-6, 7) * 1.0
+    X = np.stack(np.meshgrid(g, g, indexing="ij"), -1).reshape(-1, 2)
+    r = np.linalg.norm(X, axis=1)
+    assert (q.vol * wendland(r, q.h, 2)).sum() == pytest.approx(1.0, abs=1e-2)
+    fr = wendland_fac(r, q.h, 2)[:, None] * (-X)
+    m = -(q.vol * (-X)[:, :, None] * fr[:, None, :]).sum(0)
+    assert np.allclose(m, np.eye(2), atol=1e-2)
+
+
+def test_neighbor_search_2d_cell_h():
+    rng = np.random.default_rng(3)
+    pts = np.c_[rng.uniform(0, 200, 600), np.zeros(600), rng.uniform(0, 150, 600)]
+    p = Params(dp=10.0, hswl=100.0, dim=2)
+    s = wcsph.Solver(p, pts[200:], pts[:200], cell_div=2)
+    got = s.neighbor_counts()
+    allp = np.vstack([pts[:200], pts[200:]])
+    d2 = ((allp[:, None, :] - allp[None, :, :]) ** 2).sum(-1)
+    assert np.array_equal(got, ((d2 <= p.support ** 2) & (d2 > 1e-18)).sum(1))
+
+
+@pytest.mark.parametrize("scheme", ["symplectic", "verlet"])
+def test_2d_hydrostatic_and_verlet(scheme):
+    f, b, n = cases.tank2d(400, 300, 200, 20.0)
+    p = Params(dp=20.0, hswl=200.0, dim=2, scheme=scheme)
+    s = wcsph.Solver(p, f, b, bound_normals=n, cell_div=2)
+    s.hydrostatic(f[:, 2].max(), bound=False)
+    s.run(1.2)
+    d = s.snapshot(True)
+    z = d["pos"][:, 2]
+    zt = z.max() + 10.0
+    sel = (z > 40) & (z < zt - 40)
+    ref = p.rho0 * 9810.0 * (zt - z[sel])
+    assert np.abs(d["press"][sel] - ref).mean() / ref.mean() < 0.06
+    assert s.info()["out"] == 0 and np.all(np.abs(d["pos"][:, 1]) < 1e-9)
+
+
+def test_batched_steps_match_single_steps():
+    f, b = cases.tank(160, 160, 300, 120, 20)
+    p = Params(dp=20.0, hswl=120.0)
+    a = wcsph.Solver(p, f, b, cell_div=2)
+    c = wcsph.Solver(p, f, b, cell_div=2)
+    for _ in range(20):
+        a.step()
+    c.advance(20)
+    assert a.time == pytest.approx(c.time, rel=1e-9)
+    assert np.allclose(a.snapshot()["pos"], c.snapshot()["pos"], atol=1e-6)

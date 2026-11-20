@@ -24,11 +24,13 @@
       <h2>유체 · 입자 <small>mm · tonne · s · MPa</small></h2>
       <div class="row two"><label>유체<select id="fluidPreset"><option value="water">물 20°C</option><option value="air">공기 20°C</option><option value="oil">윤활유</option><option value="custom">직접 입력</option></select></label><label>입자 간격 dx (mm)<input id="dx" type="number" step="any" min="0"></label></div>
       <div class="row two"><label>ρ₀ (tonne/mm³)<input id="rho0" type="number" step="any"></label><label>μ (MPa·s)<input id="mu" type="number" step="any"></label></div>
+      <div class="row two"><label>유체 입자 수 (목표)<input id="pcount" type="number" step="1000" min="100"></label><label>빠른 선택<select id="pquick"><option value="">입자 수…</option><option value="2000">2천 (훑어보기)</option><option value="10000">1만</option><option value="50000">5만</option><option value="200000">20만 (GPU)</option><option value="1000000">100만 (GPU)</option></select></label></div>
       <div id="estimate" class="info"></div>
     </section>
     <section>
       <h2>해석</h2>
       <div class="row two"><label>경계 조건<select id="boundary"><option value="mdbc">mDBC (정밀)</option><option value="dbc">DBC (빠름)</option></select></label><label>계산 장치<select id="device"><option value="auto">자동</option><option value="cuda">CUDA</option><option value="metal">Metal</option><option value="vulkan">Vulkan</option><option value="cpu">CPU</option></select></label></div>
+      <div class="row two"><label>시간 적분<select id="scheme"><option value="symplectic">Symplectic (정밀)</option><option value="verlet">Verlet (약 2배 빠름)</option></select></label><label>음속 계수<select id="coefsound"><option value="20">20 (기본)</option><option value="10">10 (약 2배 빠름)</option></select></label></div>
       <div class="row two"><label>점성<select id="viscosity"><option value="artificial">인공 점성 α</option><option value="laminar">층류 (μ 사용)</option></select></label><label>α<input id="alpha" type="number" step="0.005" min="0"></label></div>
       <div class="row three"><label>해석 시간 (s)<input id="tEnd" type="number" step="any" min="0"></label><label>출력 (프레임/s)<input id="fps" type="number" step="1" min="1"></label><label>CFL<input id="cfl" type="number" step="0.05" min="0" max="1"></label></div>
       <div class="row two"><label>중력 z (mm/s²)<input id="gz" type="number" step="any"></label><span></span></div>
@@ -68,7 +70,7 @@
     </section>
     <section>
       <h2>결과 표시 <small>계산 중에도 갱신</small></h2>
-      <div class="row two"><label>색 범위<select id="rangeMode"><option value="frame">프레임마다</option><option value="fixed">고정</option></select></label><label>입자 크기<input id="psize" type="number" min="1" max="10" value="3"></label></div>
+      <div class="row two"><label>색 범위<select id="rangeMode"><option value="frame">프레임마다</option><option value="fixed">고정</option></select></label><span></span></div>
       <div class="row two"><label class="check"><input type="checkbox" id="showPart" checked>입자</label><span></span></div>
       <div class="slicerow"><label class="check"><input type="checkbox" id="slX">X 단면</label><input id="slXv" type="range" min="0" max="1000" value="500"></div>
       <div class="slicerow"><label class="check"><input type="checkbox" id="slY">Y 단면</label><input id="slYv" type="range" min="0" max="1000" value="500"></div>
@@ -83,6 +85,7 @@
     <div id="viewer">
       <canvas id="gl"></canvas>
       <canvas id="gizmo" width="96" height="96"></canvas>
+      <div id="dimbar"><button id="dim3" type="button">3D</button><button id="dim2" type="button">2D</button><label id="planeLab" hidden>단면 y<input id="planeY" type="number" step="any"></label></div>
       <div id="hud"></div>
       <div id="legend" hidden><div id="legendTitle"></div><div id="legendBar"></div><div id="legendTicks"></div></div>
       <div id="viewbar">
@@ -91,6 +94,7 @@
         <label class="check"><input type="checkbox" id="showEdges" checked>요소 경계</label>
         <label class="check"><input type="checkbox" id="showSymbols" checked>영역·유입구</label>
         <label class="check"><input type="checkbox" id="showPreview" checked>입자 미리보기</label>
+        <label class="check">입자 크기<input id="pscale" type="range" min="0.2" max="1.5" step="0.05" value="1"></label>
       </div>
       <div id="resultbar" hidden>
         <button id="play">▶</button>

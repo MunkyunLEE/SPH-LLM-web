@@ -13,21 +13,30 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 llm.PREFIXES[:] = ["SPHWEB", "SIMWEB"]
 
 
-def preview_points(sp, limit=40000):
+def preview_points(sp, limit=150000):
     dx = sp["particle"]["dx"]
+    dim = sp.get("dim", 3)
+    y0 = dx * (np.round(float(sp.get("plane_y", 0.0)) / dx - 0.5) + 0.5)
     pts = []
+    step = 1
     for b in sp["fluid_blocks"]:
-        lo, hi = np.array(b["box"]["min"]), np.array(b["box"]["max"])
+        lo, hi = np.array(b["box"]["min"], float), np.array(b["box"]["max"], float)
         n = np.maximum(np.floor((hi - lo) / dx + 1e-9).astype(int), 0)
+        if dim == 2:
+            if not lo[1] <= y0 <= hi[1]:
+                continue
+            n[1] = 1
         if n.prod() == 0:
             continue
-        step = max(1, int(np.ceil((n.prod() / max(limit // max(len(sp["fluid_blocks"]), 1), 1)) ** (1 / 3))))
+        step = max(step, int(np.ceil((n.prod() / max(limit // max(len(sp["fluid_blocks"]), 1), 1)) ** (1 / dim))))
         ax = [lo[k] + dx * (0.5 + np.arange(0, n[k], step)) for k in range(3)]
+        if dim == 2:
+            ax[1] = np.array([y0])
         g = np.stack(np.meshgrid(*ax, indexing="ij"), -1).reshape(-1, 3)
         pts.append(g)
     if not pts:
-        return []
-    return np.round(np.vstack(pts), 3).tolist()
+        return [], step
+    return np.round(np.vstack(pts), 3).tolist(), step
 
 
 class Plugin:
@@ -43,7 +52,7 @@ class Plugin:
 
     def on_geometry(self, old, geom):
         new = spec.default_spec(geom)
-        for k in ("fluid", "particle", "gravity", "solver", "device"):
+        for k in ("fluid", "particle", "gravity", "solver", "device", "dim"):
             new[k] = old[k]
         return new
 
@@ -84,7 +93,8 @@ class Plugin:
         @app.get("/api/preview")
         def preview():
             with lock:
-                return {"points": preview_points(S["spec"]), "estimate": spec.estimate(S["spec"])}
+                pts, step = preview_points(S["spec"])
+                return {"points": pts, "step": step, "dx": S["spec"]["particle"]["dx"], "estimate": spec.estimate(S["spec"])}
 
         @app.post("/api/solve")
         def solve():
