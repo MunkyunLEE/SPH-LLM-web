@@ -17,7 +17,10 @@
 - `sphweb/rules.py`: 한국어 규칙 해석기. 새 문장 패턴은 여기에 추가하고 `tests/test_rules.py` 의 CASES 에 시험 추가
 - `sphweb/prompt.py`: LLM 시스템 지시문과 문맥
 - `sphweb/results.py`: 결과 형식 v1 (`meta.json` + `frames/*.npz`, 입자 ID 고정), `pack` 으로 Rhino 용 단일 npz
-- `sphweb/engine/backend.py`: Taichi 장치 확인(하위 프로세스) · 벤치마크. 솔버 커널은 2단계에서 `sphweb/engine/` 에 추가
+- `sphweb/engine/backend.py`: Taichi 장치 확인(하위 프로세스) · 벤치마크
+- `sphweb/engine/consts.py`: DualSPHysics 와 같은 상수 계산 (h, Cs0, B, η², DDT, dt). `wcsph.py`: Taichi WCSPH (셀 이웃 탐색, Wendland, Tait, 인공 점성, DDT2 Fourtakas, DBC, Symplectic, 가변 dt). 내부 변수는 ρ/ρ₀, p/ρ₀, 입자 부피. `cases.py`: GenCase 와 같은 격자 배치
+- Taichi 는 컴파일할 때 소스 파일을 다시 읽으므로, 계산이 도는 중에 `sphweb/engine/*.py` 를 고치지 않음
+- `validation/`: 원본 DualSPHysics 와 같은 장면 (`validation/dsph/*_Def.xml`) 과 비교 스크립트
 - `web/`: `index.html`, `app.js`, `style.css`, `theory.html` (기능을 바꾸면 같이 갱신)
 - `examples/make_examples.py` → `presets.json` 과 예제 형상. 예제를 바꾸면 `tests/test_api.py::test_examples_listed` 갱신
 
@@ -29,7 +32,7 @@
 
 ## 실행
 - `./scripts/setup.sh` (가상환경 `~/.venvs/sphweb`, 옆 폴더 `../Simweb-Core` 를 editable 설치), `./scripts/run.sh` → `http://localhost:8766`
-- 시험: `python -m pytest tests -q` (약 1초)
+- 시험: `python -m pytest tests -q` (Taichi 첫 컴파일 포함 약 20~50초, 이후 캐시)
 
 ## 커밋
 - 단계 작업은 `stage<N>/...` 브랜치, 커밋 메시지는 한국어 한 줄 요약 + 항목
