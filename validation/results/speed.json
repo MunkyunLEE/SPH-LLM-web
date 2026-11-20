@@ -1,0 +1,52 @@
+{
+ "dam2d|40|ver20dbc": {
+  "nfluid": 1250,
+  "nbound": 251,
+  "ms_step": 2.02383404687545
+ },
+ "dam2d|40|sym20": {
+  "nfluid": 1250,
+  "nbound": 1028,
+  "ms_step": 4.251441539063094
+ },
+ "dam2d|20|ver20dbc": {
+  "nfluid": 5000,
+  "nbound": 501,
+  "ms_step": 3.819382875001054
+ },
+ "dam2d|20|sym20": {
+  "nfluid": 5000,
+  "nbound": 2028,
+  "ms_step": 11.25515082031292
+ },
+ "dam2d|10|ver20dbc": {
+  "nfluid": 20000,
+  "nbound": 1001,
+  "ms_step": 11.684207289063053
+ },
+ "dam2d|10|sym20": {
+  "nfluid": 20000,
+  "nbound": 4028,
+  "ms_step": 25.861139101561292
+ },
+ "dam3d|20|sym20": {
+  "nfluid": 800,
+  "nbound": 14496,
+  "ms_step": 17.199974578126387
+ },
+ "dam3d|20|ver10": {
+  "nfluid": 800,
+  "nbound": 14496,
+  "ms_step": 15.472707023437948
+ },
+ "dam3d|10|sym20": {
+  "nfluid": 7200,
+  "nbound": 51996,
+  "ms_step": 84.1832258593751
+ },
+ "dam3d|10|ver10": {
+  "nfluid": 7200,
+  "nbound": 51996,
+  "ms_step": 57.44876383593933
+ }
+}

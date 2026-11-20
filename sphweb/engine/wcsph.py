@@ -38,7 +38,7 @@ class Solver:
             lo, hi = allp.min(0), allp.max(0)
             pad = params.support
             domain = (lo - pad, hi + pad + 0.5 * (hi - lo))
-        lo, hi = np.asarray(domain[0], float), np.asarray(domain[1], float)
+        lo, hi = np.array(domain[0], float), np.array(domain[1], float)
         self.dim = int(params.dim)
         if self.dim == 2:
             yc = float(allp[:, 1].mean())

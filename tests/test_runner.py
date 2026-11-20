@@ -81,3 +81,18 @@ def test_run_frames_and_controls(tmp_path):
     r.control("stop")
     st = _wait(r, lambda s: s["state"] == "stopped")
     assert st["t"] < 5.0
+
+
+def test_run_2d_grid_on_plane(tmp_path):
+    sp, g = _spec(0.02)
+    sp, _ = S.apply_ops(sp, [{"op": "set_dim", "dim": 2, "plane_y": 300}, {"op": "set_particle", "dx": 20}, {"op": "set_solver", "scheme": "verlet"}], g)
+    r = Runner(str(tmp_path))
+    r.start(sp, g, "cpu")
+    st = _wait(r, lambda s: s["state"] in ("done", "error"))
+    assert st["state"] == "done", st["message"]
+    head, a = _decode(r.frame_bytes(-1))
+    assert head["grid"]["n"][1] == 1
+    pos = a["pos"].reshape(-1, 3)
+    assert np.allclose(pos[:, 1], head["grid"]["origin"][1])
+    assert a["gocc"].sum() > 50
+
