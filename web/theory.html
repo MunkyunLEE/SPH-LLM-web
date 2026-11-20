@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPH-LLM-web · 원리와 설계</title>
+<link rel="stylesheet" href="/core/theory.css">
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h1>SPH<span>·LLM</span> Theory</h1>
+  <p>이 프로그램이 어떻게 만들어지고, 어떤 원리로 계산하는지 정리한 문서입니다. 단계가 진행될 때마다 같이 갱신합니다.</p>
+  <a href="#overview">1. 한눈에 보기</a>
+  <a href="#roadmap">2. 로드맵과 현황</a>
+  <a href="#units">3. 단위계</a>
+  <a href="#sph">4. SPH 원리</a>
+  <a class="sub" href="#sph-kernel">4-1. 커널 보간</a>
+  <a class="sub" href="#sph-eq">4-2. 지배방정식</a>
+  <a class="sub" href="#sph-bc">4-3. 벽 경계 (mDBC)</a>
+  <a class="sub" href="#sph-time">4-4. 시간적분</a>
+  <a href="#case">5. 케이스 구성</a>
+  <a href="#verify">6. 검증 계획</a>
+  <a href="#llm">7. LLM 연결 방식</a>
+  <a href="#refs">8. 참고 문헌</a>
+</nav>
+<main>
+<h2 id="overview">1. 한눈에 보기</h2>
+<p class="lead">형상(OBJ·STL)을 올리고, 유체 블록·유입구·유출 영역을 화면이나 문장으로 지정한 뒤, 로컬 GPU에서 SPH 해석을 돌리고 결과를 3D 로 확인하는 개인용 도구입니다.</p>
+<div class="card tip"><b class="t">구성</b>화면과 LLM 연결은 공통 모듈 <code>Simweb-Core</code>(FEM-LLM-web 에서 분리)를 씁니다. 계산 코어는 Taichi 로 작성해 같은 코드가 NVIDIA CUDA(WSL·Windows·Linux), Apple Metal(Mac), CPU 에서 돕니다. 수식은 DualSPHysics v5.4 를 기준으로 하고, 같은 장면을 원본 DualSPHysics 로도 돌려 결과를 비교합니다.</div>
+<table>
+<tr><th>갈래</th><th>내용</th></tr>
+<tr><td>① 자유수면·대변형 유동</td><td>댐 붕괴, 제트, 튀김, 슬로싱</td></tr>
+<tr><td>② FSI</td><td>강체 + 힌지, 이후 Bar-and-Hinge 오리가미에 유체력 전달</td></tr>
+<tr><td>③ SWE-SPH</td><td>지형 위 천수 방정식 입자, 범람 해석</td></tr>
+</table>
+
+<h2 id="roadmap">2. 로드맵과 현황</h2>
+<table>
+<tr><th>단계</th><th>내용</th><th>상태</th></tr>
+<tr><td>1. 기반</td><td>Simweb-Core, 화면, 케이스 스키마, 규칙 해석기, LLM 연결, 계산 장치 확인</td><td>진행 중</td></tr>
+<tr><td>2. 3D 유체 코어</td><td>WCSPH (DualSPHysics 수식), mDBC, Symplectic, 실시간 화면, 스텝 제어, 결과 UI (속도·압력·와도·단면·Q-criterion·프로브)</td><td>예정</td></tr>
+<tr><td>3. 형상·조건·LLM</td><td>STL·OBJ → 경계 입자, 유입·유출, 조건부 정지, 스냅샷, Rhino 내보내기</td><td>예정</td></tr>
+<tr><td>4. FSI</td><td>4a 강체 + 힌지, 4b Bar-and-Hinge 동적 연성</td><td>예정</td></tr>
+<tr><td>5. SWE-SPH</td><td>지형 높이장, 천수 방정식, 마찰, 젖음/마름, 범람</td><td>예정</td></tr>
+</table>
+
+<h2 id="units">3. 단위계</h2>
+<p>화면, 문장 지시, 케이스 파일, 결과 파일은 모두 FEM-LLM-web 과 같은 <b>mm · tonne · s · N · MPa</b> 입니다.</p>
+<table>
+<tr><th>물리량</th><th>값</th></tr>
+<tr><td>물 밀도</td><td>0.998e-9 tonne/mm³</td></tr>
+<tr><td>공기 밀도</td><td>1.204e-12 tonne/mm³</td></tr>
+<tr><td>물 점성계수</td><td>1.002e-9 MPa·s</td></tr>
+<tr><td>중력</td><td>9810 mm/s²</td></tr>
+<tr><td>수심 1 m 정수압</td><td>약 0.0098 MPa</td></tr>
+</table>
+<div class="card warn"><b class="t">GPU 단정밀도 주의</b>float32 에서 (입자 질량 × 커널 기울기)² 같은 항이 1e-30 수준까지 작아집니다. 물은 여유가 있지만 공기나 굵은 입자(홍수 해석)에서는 float32 최소값 1.2e-38 에 닿아 조용히 0 이 될 수 있습니다. 그래서 계산 코어 안에서만 밀도를 ρ/ρ₀, 질량을 입자 부피 기준으로 정규화하고, 입출력에서 한 번만 변환합니다. 2단계 정수압 벤치마크에서 SI 계산과 결과가 같은지 매번 확인합니다.</div>
+
+<h2 id="sph">4. SPH 원리</h2>
+<p>유체를 질량을 가진 입자로 나누고, 각 입자의 물리량을 주변 입자의 가중 평균으로 계산합니다. 격자가 없어서 자유수면이 깨지거나 물체가 크게 움직여도 다시 메쉬를 만들 필요가 없습니다.</p>
+<h3 id="sph-kernel">4-1. 커널 보간</h3>
+<div class="eq">A(<b>r</b><sub>a</sub>) ≈ Σ<sub>b</sub> (m<sub>b</sub>/ρ<sub>b</sub>) A<sub>b</sub> W(<b>r</b><sub>ab</sub>, h)<span class="n">(1)</span></div>
+<p class="where"><b>W</b> Wendland 5차 커널 (DualSPHysics 기본), <b>h</b> 평활 길이, 지지 반경 2h</p>
+<h3 id="sph-eq">4-2. 지배방정식 (WCSPH, DualSPHysics)</h3>
+<div class="eq">dρ<sub>a</sub>/dt = ρ<sub>a</sub> Σ<sub>b</sub> (m<sub>b</sub>/ρ<sub>b</sub>) <b>v</b><sub>ab</sub>·∇<sub>a</sub>W<sub>ab</sub> + 2δhc<sub>0</sub> Σ<sub>b</sub> ψ<sub>ab</sub>·∇<sub>a</sub>W<sub>ab</sub> (m<sub>b</sub>/ρ<sub>b</sub>)<span class="n">(2) 연속 + δ-SPH</span></div>
+<div class="eq">d<b>v</b><sub>a</sub>/dt = −Σ<sub>b</sub> m<sub>b</sub> ((P<sub>a</sub>+P<sub>b</sub>)/(ρ<sub>a</sub>ρ<sub>b</sub>) + Π<sub>ab</sub>) ∇<sub>a</sub>W<sub>ab</sub> + <b>g</b><span class="n">(3) 운동량</span></div>
+<div class="eq">P = (c<sub>0</sub>² ρ<sub>0</sub> / γ) [ (ρ/ρ<sub>0</sub>)<sup>γ</sup> − 1 ],  γ = 7<span class="n">(4) Tait 상태방정식</span></div>
+<p class="where"><b>Π<sub>ab</sub></b> 인공점성(Monaghan, α) 또는 층류 점성, <b>ψ<sub>ab</sub></b> 밀도 확산 항 (Fourtakas 정수압 보정형), <b>c<sub>0</sub></b> 인공 음속 (최대 유속의 10배 이상)</p>
+<p class="mute">정확한 식과 계수는 2단계 구현 때 DualSPHysics v5.4 문서·소스와 대조해 이 절을 갱신합니다.</p>
+<h3 id="sph-bc">4-3. 벽 경계 (mDBC)</h3>
+<p>벽 표면 안쪽에 경계 입자를 깔고, 각 경계 입자에서 유체 쪽으로 대칭인 점(고스트 점)의 밀도를 주변 유체 입자로 보간해 경계 입자 밀도로 씁니다. 벽을 뚫고 들어가지 않으면서, 벽 근처 압력 분포가 고르게 나옵니다. no-slip, free-slip 모드를 지원할 예정입니다.</p>
+<h3 id="sph-time">4-4. 시간적분</h3>
+<p>Symplectic 예측-수정 적분에 가변 시간간격을 씁니다. Δt 는 힘 조건, 음속·점성 조건 중 작은 값에 CFL 계수를 곱해 정합니다.</p>
+
+<h2 id="case">5. 케이스 구성</h2>
+<table>
+<tr><th>항목</th><th>내용</th></tr>
+<tr><td>해석 영역</td><td>이 박스를 벗어난 입자는 제거</td></tr>
+<tr><td>물체</td><td>올린 형상의 그룹별 역할 (벽 / 무시). 4단계부터 강체·힌지</td></tr>
+<tr><td>유체 블록</td><td>입자 간격 dx 격자로 채우는 초기 유체</td></tr>
+<tr><td>유입구</td><td>중심, 방향, 속력, 사각 또는 원형 단면, 유입 시간. 입자 ID 는 미리 확보해 두고 생성 시 켬</td></tr>
+<tr><td>유출 영역</td><td>들어간 입자를 제거하는 박스</td></tr>
+<tr><td>정지 조건</td><td>밀도 오차, 하중 등이 기준을 넘으면 일시정지</td></tr>
+</table>
+<p>결과는 입자 ID 가 처음부터 끝까지 고정된 프레임 파일로 저장합니다 (<code>meta.json</code> + <code>frames/*.npz</code>). Rhino 용으로는 한 파일(npz)로 묶어 내보냅니다.</p>
+
+<h2 id="verify">6. 검증 계획</h2>
+<table>
+<tr><th>층</th><th>내용</th></tr>
+<tr><td>1. 단위 시험</td><td>커널 정규화, 이웃 탐색, 단위 일치(SI 대 mm·tonne), 스키마, 규칙 해석기</td></tr>
+<tr><td>2. 보존 검사</td><td>질량 보존, 밀도 오차, 에너지 균형, 작용·반작용 (모든 해석에서 자동)</td></tr>
+<tr><td>3. 벤치마크</td><td>정수압, 댐 붕괴(Martin & Moyce, Koshizuka & Oka), 깔때기 배수, 부력, 쐐기 낙하, Stoker·Ritter·Thacker, 영국 환경청 홍수 벤치마크</td></tr>
+<tr><td>4. 수렴·회귀</td><td>해상도 3단계, CI 회귀 시험, 결과 이력 기록</td></tr>
+<tr><td>5. 교차검증</td><td><b>같은 장면을 원본 DualSPHysics 로 돌려 비교</b>, 필요하면 SPlisHSPlasH·OpenFOAM</td></tr>
+</table>
+<p>통과 기준은 벤치마크마다 정한 정합도 75% 이상입니다.</p>
+
+<h2 id="llm">7. LLM 연결 방식</h2>
+<p>FEM-LLM-web 과 같습니다. 문장을 먼저 규칙 해석기가 읽고, 다 이해하면 바로 적용합니다. 못 알아들은 말이 남으면 그 문장만 LLM 으로 보냅니다. LLM 은 케이스를 직접 쓰지 않고 수정 지시(ops) JSON 만 내며, 서버가 검증한 뒤 적용합니다. 검증에 실패하면 오류를 붙여 한 번 더 요청합니다.</p>
+<p>연결은 OpenAI 호환 엔드포인트 + API 키입니다. 화면 오른쪽 위에 넣거나 환경 변수 <code>SPHWEB_LLM_URL</code>, <code>SPHWEB_LLM_MODEL</code>, <code>SPHWEB_LLM_KEY</code> 로 지정합니다. 로컬 LLM 을 설치할 필요는 없습니다.</p>
+
+<h2 id="refs">8. 참고 문헌</h2>
+<ul>
+<li>Domínguez J.M. et al. (2022) DualSPHysics: from fluid dynamics to multiphysics problems. Computational Particle Mechanics 9, 867–895</li>
+<li>DualSPHysics v5.4 (2025), <a href="https://github.com/DualSPHysics/DualSPHysics">github.com/DualSPHysics/DualSPHysics</a></li>
+<li>English A. et al. (2022) Modified dynamic boundary conditions (mDBC) for general-purpose smoothed particle hydrodynamics (SPH). Computational Particle Mechanics 9, 1–15</li>
+<li>Fourtakas G. et al. (2019) Computers &amp; Fluids 190, 346–361 (DualSPHysics 가 쓰는 밀도 확산항 정수압 보정, 2단계 구현 때 원문 대조)</li>
+<li>Monaghan J.J. (2005) Smoothed particle hydrodynamics. Rep. Prog. Phys. 68, 1703</li>
+<li>Koschier D. et al. (2019) SPH Techniques for the Physics Based Simulation of Fluids and Solids. Eurographics Tutorial</li>
+</ul>
+</main>
+</div>
+</body>
+</html>

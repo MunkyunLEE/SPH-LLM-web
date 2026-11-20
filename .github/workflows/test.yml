@@ -1,0 +1,26 @@
+name: test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: SPH-LLM-web
+      - uses: actions/checkout@v4
+        with:
+          repository: MunkyunLEE/Simweb-Core
+          ref: ${{ github.ref_name == 'main' && 'main' || github.head_ref || github.ref_name }}
+          path: Simweb-Core
+        continue-on-error: true
+      - uses: actions/checkout@v4
+        if: hashFiles('Simweb-Core/pyproject.toml') == ''
+        with:
+          repository: MunkyunLEE/Simweb-Core
+          ref: main
+          path: Simweb-Core
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e Simweb-Core -e "SPH-LLM-web[test]"
+      - run: cd SPH-LLM-web && python examples/make_examples.py && python -m sphweb.engine.backend --bench 200000 && python -m pytest tests -q

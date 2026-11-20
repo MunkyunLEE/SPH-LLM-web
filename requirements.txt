@@ -1,0 +1,4 @@
+simweb-core @ git+https://github.com/MunkyunLEE/Simweb-Core.git@main
+numpy>=1.26
+taichi>=1.7
+pytest>=8

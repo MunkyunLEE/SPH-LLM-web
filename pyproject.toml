@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sph-llm-web"
+version = "0.1.0"
+description = "SPH fluid / FSI / SWE simulator on the web with LLM control (local compute, Taichi GPU)"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["simweb-core", "numpy>=1.26", "taichi>=1.7"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["sphweb*"]

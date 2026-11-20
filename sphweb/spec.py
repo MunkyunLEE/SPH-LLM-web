@@ -31,7 +31,7 @@ def default_spec(geom=None):
         "fluid": {"preset": "water", "name": f["name"], "rho0": f["rho"], "mu": f["mu"]},
         "particle": {"dx": dx},
         "gravity": [0.0, 0.0, -units.G],
-        "solver": {"method": "dfsph", "t_end": 2.0, "fps": 30, "cfl": 0.4, "tol_density": 0.05, "tol_divergence": 0.1, "max_iter": 100, "viscosity": "artificial", "alpha": 0.02},
+        "solver": {"method": "wcsph", "t_end": 2.0, "fps": 30, "cfl": 0.4, "tol_density": 0.05, "tol_divergence": 0.1, "max_iter": 100, "viscosity": "artificial", "alpha": 0.02},
         "device": "auto",
         "bodies": bodies,
         "fluid_blocks": [],

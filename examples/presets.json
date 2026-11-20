@@ -1,0 +1,151 @@
+{
+  "dam_break": {
+    "title": "3D 댐 붕괴 (탱크 1600×600×600)",
+    "file": "dam_tank.obj",
+    "note": "물기둥 400×600×300 mm. 2단계 검증 기준 (Martin & Moyce 1952, DualSPHysics CaseDambreak 과 비교 예정)",
+    "prompts": [
+      "입자 간격 10 mm",
+      "해석 시간 1.5초",
+      "x 0~400, y 0~600, z 0~300 mm 에 물 채워줘"
+    ],
+    "ops": [
+      {
+        "op": "set_particle",
+        "dx": 10
+      },
+      {
+        "op": "set_solver",
+        "t_end": 1.5,
+        "fps": 50
+      },
+      {
+        "op": "set_domain",
+        "min": [
+          -100,
+          -100,
+          -100
+        ],
+        "max": [
+          1700,
+          700,
+          800
+        ]
+      },
+      {
+        "op": "add_fluid_block",
+        "name": "물기둥",
+        "box": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            400,
+            600,
+            300
+          ]
+        }
+      }
+    ]
+  },
+  "funnel_jet": {
+    "title": "깔때기 위에서 쏘는 제트",
+    "file": "funnel.stl",
+    "note": "깔때기 상단 위 (100, 0, 580) mm 에서 아래로 1.5 m/s 원형 제트, 2.4 초 동안 유입",
+    "prompts": [
+      "입자 간격 5 mm",
+      "(100, 0, 580) mm 에서 아래로 1.5 m/s 로 유입, 지름 40 mm",
+      "z -300~-100, x -300~300, y -300~300 mm 유출 영역 만들어줘"
+    ],
+    "ops": [
+      {
+        "op": "set_particle",
+        "dx": 5
+      },
+      {
+        "op": "set_solver",
+        "t_end": 3.0,
+        "fps": 30
+      },
+      {
+        "op": "set_domain",
+        "min": [
+          -300,
+          -300,
+          -300
+        ],
+        "max": [
+          300,
+          300,
+          650
+        ]
+      },
+      {
+        "op": "add_inlet",
+        "name": "제트",
+        "center": [
+          100,
+          0,
+          580
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "speed": 1500,
+        "shape": "circle",
+        "size": [
+          40,
+          40
+        ],
+        "t_end": 2.4
+      },
+      {
+        "op": "add_outlet",
+        "name": "바닥 배출",
+        "box": {
+          "min": [
+            -300,
+            -300,
+            -300
+          ],
+          "max": [
+            300,
+            300,
+            -150
+          ]
+        }
+      }
+    ]
+  },
+  "origami_panels": {
+    "title": "오리가미 패널 2×2 (힌지 선 포함, 4단계용)",
+    "file": "origami_2x2.obj",
+    "note": "FEM-LLM-web 과 같은 OBJ 규칙: 면 = 패널, hinge_ 그룹 선 = 접힘선. FSI 는 4단계에서 연결",
+    "prompts": [
+      "x 0~400, y 0~400, z 0~150 mm 에 물 채워줘",
+      "입자 간격 8 mm"
+    ],
+    "ops": [
+      {
+        "op": "set_particle",
+        "dx": 8
+      },
+      {
+        "op": "set_domain",
+        "min": [
+          -100,
+          -100,
+          -50
+        ],
+        "max": [
+          500,
+          500,
+          500
+        ]
+      }
+    ]
+  }
+}

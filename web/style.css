@@ -1,0 +1,6 @@
+.file-btn{display:inline-block;cursor:pointer;flex-direction:row;color:var(--text);font-size:13px;padding:6px 8px}
+.item .edit input{padding:3px 5px;font-size:11px}
+.item .edit .lab{font-size:11px;color:var(--mute);min-width:44px;align-self:center}
+.item select{padding:2px 4px;font-size:11px;width:auto}
+#warnings div.info{color:var(--mute)}
+.swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle}
