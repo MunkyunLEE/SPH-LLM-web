@@ -32,11 +32,15 @@ def bottom_force(pos, press, kind, dp, area, weight):
     return float(press[m].sum() * dp * dp / weight)
 
 
-def run_ours(dp, size, depth, t_end, every, arch, out):
+def run_ours(dp, size, depth, t_end, every, arch, out, mdbc=False):
     wcsph.init(arch)
-    f, b = cases.tank(size, size, 400.0, depth, dp)
+    if mdbc:
+        f, b, nr = cases.tank(size, size, 400.0, depth, dp, layers=4, normals=True)
+    else:
+        f, b = cases.tank(size, size, 400.0, depth, dp)
+        nr = None
     p = Params(dp=dp, hswl=depth)
-    s = wcsph.Solver(p, f, b)
+    s = wcsph.Solver(p, f, b, bound_normals=nr)
     s.hydrostatic(f[:, 2].max(), bound=False)
     weight = p.rho0 * 9810.0 * len(f) * p.vol
     rows = []
@@ -149,12 +153,13 @@ def main():
     ap.add_argument("--dsph", default=None)
     ap.add_argument("--out", default="runs/hydrostatic")
     ap.add_argument("--skip-unit", action="store_true")
+    ap.add_argument("--mdbc", action="store_true")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     res = {"case": vars(a)}
     if not a.skip_unit:
         res["unit"] = unit_check(a.arch)
-    res["ours"] = run_ours(a.dp, a.size, a.depth, a.t, a.every, a.arch, a.out)
+    res["ours"] = run_ours(a.dp, a.size, a.depth, a.t, a.every, a.arch, a.out, a.mdbc)
     res["dsph"] = read_dsph(a.dsph, a.dp, a.size) if a.dsph else None
     with open(os.path.join(a.out, "result.json"), "w") as f:
         json.dump(res, f, indent=1, default=float)

@@ -82,7 +82,9 @@ export function mountResults(V, opt) {
     if (!flat.length) return;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(flat), 3));
-    group.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, transparent: opacity < 1, opacity })));
+    const ls = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, transparent: opacity < 1, opacity, depthTest: false }));
+    ls.renderOrder = 5;
+    group.add(ls);
   }
 
   function slicePlane(G, P, s, field, lo, hi) {
@@ -104,6 +106,8 @@ export function mountResults(V, opt) {
     const v = view();
     const meta = F.FIELDS[v.field];
     [gPart, gSlice, gLines, gIso].forEach((g) => V.clear(g));
+    V.group('preview').visible = false;
+    document.body.classList.add('has-result');
     if ((v.field === 'q' || v.iso) && !R.Q) R.Q = F.qField(R.grid);
     const pv = particleValues(fr, v.field);
     let lo;
@@ -250,6 +254,7 @@ export function mountResults(V, opt) {
       R.follow = true;
       R.frames = 0;
       R.fr = null;
+      document.body.classList.remove('has-result');
       [gPart, gSlice, gLines, gIso].forEach((g) => V.clear(g));
       R.run = await api('/api/solve', { method: 'POST' });
       opt.note('해석을 시작했습니다');

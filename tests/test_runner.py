@@ -63,6 +63,11 @@ def test_run_frames_and_controls(tmp_path):
     assert a["gu"].size == 3 * int(np.prod(head["grid"]["n"]))
     assert a["gocc"].sum() > 0
     assert len(st["series"][f"probe.{sp['monitors'][0]['id']}.pressure"]) == st["frames"]
+    from sphweb import results
+
+    last = results.Reader(st["dir"]).frame(st["frames"] - 1)
+    p = last["positions"][last["active"].astype(bool)]
+    assert p[:, 2].min() > 0 and p[:, 0].min() > 0 and p[:, 1].min() > 0
 
     sp2, _ = _spec(5.0)
     r.start(sp2, g, "cpu")

@@ -46,6 +46,10 @@ def test_dam_tank_case():
     assert np.all(n[floor, 2] > 0) and np.allclose(n[floor, :2], 0)
     ghost = b[floor] + n[floor]
     assert np.allclose(ghost[:, 2], -b[floor, 2])
+    assert np.unique(b[floor, 2]).tolist() == [-70.0, -50.0, -30.0, -10.0]
+    assert np.linalg.norm(n, axis=1).min() > 0
+    cav = (b[:, 0] > 0) & (b[:, 0] < 1600) & (b[:, 1] > 0) & (b[:, 1] < 600) & (b[:, 2] > 0)
+    assert not cav.any()
     assert r["group_names"] == ["tank"] and set(r["group"]) == {0}
 
 

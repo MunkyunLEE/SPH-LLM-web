@@ -12,7 +12,7 @@ import numpy as np
 
 from . import casebuild, results
 
-GRID_MAX = 60000
+GRID_MAX = 120000
 SHOW_MAX = 400000
 
 
@@ -100,8 +100,7 @@ class Runner:
         dx = case["dx"]
         lo, hi = case["domain"]
         zs = float(fluid[:, 2].max())
-        zb = float(min(fluid[:, 2].min(), bound[:, 2].min() if len(bound) else fluid[:, 2].min()))
-        hswl = max(zs - zb + 0.5 * dx, 2 * dx)
+        hswl = max(zs - float(fluid[:, 2].min()) + dx, 2 * dx)
         rho0 = float(spec["fluid"]["rho0"])
         lam = sol.get("viscosity") == "laminar"
         visco = float(spec["fluid"]["mu"]) / rho0 if lam else float(sol.get("alpha", 0.02))

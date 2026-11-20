@@ -100,7 +100,7 @@ def tri_normals(V, F):
     return n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-30)
 
 
-def closest(points, V, F, chunk=200000, avoid=None, tn=None):
+def closest(points, V, F, chunk=200000, avoid=None, tn=None, behind=False):
     n = len(points)
     best = np.full(n, np.inf)
     cp = np.zeros((n, 3))
@@ -115,6 +115,9 @@ def closest(points, V, F, chunk=200000, avoid=None, tn=None):
         d = np.linalg.norm(q - points[:, None, :], axis=2)
         if avoid is not None:
             d = np.where(avoid @ tn[s : s + per].T > -0.5, np.inf, d)
+        if behind:
+            side = ((points[:, None, :] - A[None]) * tn[s : s + per][None]).sum(-1)
+            d = np.where(side >= 0, np.inf, d)
         k = d.argmin(1)
         dk = d[np.arange(n), k]
         better = dk < best
@@ -183,18 +186,34 @@ def build(spec, geom=None, layers=4):
                 cp, dist, tri = closest(solid, V, Fw)
                 band = dist <= layers * dx
                 solid, cp, dist, tri = solid[band], cp[band], dist[band], tri[band]
-                u = (cp - solid) / np.maximum(dist[:, None], 1e-12)
-                cp2, dist2, tri2 = closest(solid, V, Fw, avoid=u, tn=tri_normals(V, Fw))
+                tnw = tri_normals(V, Fw)
+                u = np.where(dist[:, None] < 1e-6, tnw[tri], (cp - solid) / np.maximum(dist[:, None], 1e-12))
+                cp2, dist2, tri2 = closest(solid, V, Fw, avoid=u, tn=tnw)
                 seeds = np.vstack([lattice(np.maximum(b["box"]["min"], lo), np.minimum(b["box"]["max"], hi), dx) for b in spec.get("fluid_blocks", [])] or [np.zeros((0, 3))])
+                extra = np.zeros((0, 3))
+                ecp = np.zeros((0, 3))
+                etri = np.zeros(0, int)
                 if len(seeds):
                     look = wet_distance(lo, hi, dx, V, F_all, seeds)
                     d1 = look(2 * cp - solid)
                     d2 = np.where(np.isfinite(dist2) & (dist2 <= layers * dx), look(2 * cp2 - solid), np.iinfo(np.int64).max)
                     flip = d2 < d1
                     cp[flip], tri[flip] = cp2[flip], tri2[flip]
-                bound = solid
-                normals = 2.0 * (cp - bound)
-                group = np.array([walls.index(g) for g in tg[keep][tri]], int)
+                    pad = layers * dx
+                    near = lattice(np.maximum(gmin - pad, lo), np.minimum(gmax + pad, hi), dx)
+                    near = near[~inside(near, V, F_all)]
+                    dn = look(near)
+                    near, dn = near[dn > 2 * layers], dn[dn > 2 * layers]
+                    bcp, bd, btri = closest(near, V, Fw, tn=tnw, behind=True)
+                    ok = (bd <= layers * dx) & (bd > 0.5 * dx)
+                    near, dn, bcp, btri = near[ok], dn[ok], bcp[ok], btri[ok]
+                    wetter = look(2 * bcp - near) + layers < dn
+                    extra, ecp, etri = near[wetter], bcp[wetter], btri[wetter]
+                    if len(extra):
+                        warn.append(f"벽이 입자 간격에 비해 얇아 바깥쪽에 경계 입자 {len(extra):,}개를 더해 {layers}층을 맞췄습니다")
+                bound = np.vstack([solid, extra])
+                normals = 2.0 * (np.vstack([cp, ecp]) - bound)
+                group = np.array([walls.index(g) for g in tg[keep][np.concatenate([tri, etri])]], int)
     fl = []
     for b in spec.get("fluid_blocks", []):
         fl.append(lattice(np.maximum(b["box"]["min"], lo), np.minimum(b["box"]["max"], hi), dx))

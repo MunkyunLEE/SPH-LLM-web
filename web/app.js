@@ -221,7 +221,7 @@ function applyVisibility() {
   V.group('model').visible = $('showModel').checked;
   V.group('edges').visible = $('showModel').checked && $('showEdges').checked;
   gSym.visible = $('showSymbols').checked;
-  gPrev.visible = $('showPreview').checked;
+  gPrev.visible = $('showPreview').checked && !document.body.classList.contains('has-result');
 }
 
 function sceneBox() {
