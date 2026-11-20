@@ -19,6 +19,7 @@
   <a class="sub" href="#sph-eq">4-2. 지배방정식</a>
   <a class="sub" href="#sph-bc">4-3. 벽 경계 (mDBC)</a>
   <a class="sub" href="#sph-time">4-4. 시간적분</a>
+  <a class="sub" href="#sph-out">4-5. 결과 표시</a>
   <a href="#case">5. 케이스 구성</a>
   <a href="#verify">6. 검증 계획</a>
   <a href="#llm">7. LLM 연결 방식</a>
@@ -38,8 +39,8 @@
 <h2 id="roadmap">2. 로드맵과 현황</h2>
 <table>
 <tr><th>단계</th><th>내용</th><th>상태</th></tr>
-<tr><td>1. 기반</td><td>Simweb-Core, 화면, 케이스 스키마, 규칙 해석기, LLM 연결, 계산 장치 확인</td><td>진행 중</td></tr>
-<tr><td>2. 3D 유체 코어</td><td>WCSPH (DualSPHysics 수식), mDBC, Symplectic, 실시간 화면, 스텝 제어, 결과 UI (속도·압력·와도·단면·Q-criterion·프로브)</td><td>예정</td></tr>
+<tr><td>1. 기반</td><td>Simweb-Core, 화면, 케이스 스키마, 규칙 해석기, LLM 연결, 계산 장치 확인</td><td>완료</td></tr>
+<tr><td>2. 3D 유체 코어</td><td>WCSPH (DualSPHysics 수식), mDBC, Symplectic, 실시간 화면, 스텝 제어, 결과 UI (속도·압력·와도·단면·Q-criterion·프로브)</td><td>완료 (보고 2)</td></tr>
 <tr><td>3. 형상·조건·LLM</td><td>STL·OBJ → 경계 입자, 유입·유출, 조건부 정지, 스냅샷, Rhino 내보내기</td><td>예정</td></tr>
 <tr><td>4. FSI</td><td>4a 강체 + 힌지, 4b Bar-and-Hinge 동적 연성</td><td>예정</td></tr>
 <tr><td>5. SWE-SPH</td><td>지형 높이장, 천수 방정식, 마찰, 젖음/마름, 범람</td><td>예정</td></tr>
@@ -62,16 +63,24 @@
 <h3 id="sph-kernel">4-1. 커널 보간</h3>
 <div class="eq">A(<b>r</b><sub>a</sub>) ≈ Σ<sub>b</sub> (m<sub>b</sub>/ρ<sub>b</sub>) A<sub>b</sub> W(<b>r</b><sub>ab</sub>, h)<span class="n">(1)</span></div>
 <p class="where"><b>W</b> Wendland 5차 커널 (DualSPHysics 기본), <b>h</b> 평활 길이, 지지 반경 2h</p>
-<h3 id="sph-eq">4-2. 지배방정식 (WCSPH, DualSPHysics)</h3>
-<div class="eq">dρ<sub>a</sub>/dt = ρ<sub>a</sub> Σ<sub>b</sub> (m<sub>b</sub>/ρ<sub>b</sub>) <b>v</b><sub>ab</sub>·∇<sub>a</sub>W<sub>ab</sub> + 2δhc<sub>0</sub> Σ<sub>b</sub> ψ<sub>ab</sub>·∇<sub>a</sub>W<sub>ab</sub> (m<sub>b</sub>/ρ<sub>b</sub>)<span class="n">(2) 연속 + δ-SPH</span></div>
-<div class="eq">d<b>v</b><sub>a</sub>/dt = −Σ<sub>b</sub> m<sub>b</sub> ((P<sub>a</sub>+P<sub>b</sub>)/(ρ<sub>a</sub>ρ<sub>b</sub>) + Π<sub>ab</sub>) ∇<sub>a</sub>W<sub>ab</sub> + <b>g</b><span class="n">(3) 운동량</span></div>
-<div class="eq">P = (c<sub>0</sub>² ρ<sub>0</sub> / γ) [ (ρ/ρ<sub>0</sub>)<sup>γ</sup> − 1 ],  γ = 7<span class="n">(4) Tait 상태방정식</span></div>
-<p class="where"><b>Π<sub>ab</sub></b> 인공점성(Monaghan, α) 또는 층류 점성, <b>ψ<sub>ab</sub></b> 밀도 확산 항 (Fourtakas 정수압 보정형), <b>c<sub>0</sub></b> 인공 음속 (최대 유속의 10배 이상)</p>
-<p class="mute">정확한 식과 계수는 2단계 구현 때 DualSPHysics v5.4 문서·소스와 대조해 이 절을 갱신합니다.</p>
-<h3 id="sph-bc">4-3. 벽 경계 (mDBC)</h3>
-<p>벽 표면 안쪽에 경계 입자를 깔고, 각 경계 입자에서 유체 쪽으로 대칭인 점(고스트 점)의 밀도를 주변 유체 입자로 보간해 경계 입자 밀도로 씁니다. 벽을 뚫고 들어가지 않으면서, 벽 근처 압력 분포가 고르게 나옵니다. no-slip, free-slip 모드를 지원할 예정입니다.</p>
+<h3 id="sph-eq">4-2. 지배방정식 (WCSPH, DualSPHysics v5.4 와 같은 식)</h3>
+<div class="eq">W(q) = (21 / 16πh³) (1 − q/2)⁴ (2q + 1),  q = r/h,  h = √3·dp,  지지 반경 2h<span class="n">(2) Wendland 커널</span></div>
+<div class="eq">dρ<sub>a</sub>/dt = Σ<sub>b</sub> m<sub>b</sub> (<b>v</b><sub>a</sub>−<b>v</b><sub>b</sub>)·∇<sub>a</sub>W<sub>ab</sub> (ρ<sub>a</sub>/ρ<sub>b</sub>) + D<sub>a</sub><span class="n">(3) 연속 방정식</span></div>
+<div class="eq">D<sub>a</sub> = −Σ<sub>b</sub> δ·2h·c<sub>0</sub> [(ρ<sub>b</sub>−ρ<sub>a</sub>) − ρ<sub>0</sub>((1 + ρ<sub>0</sub>g z<sub>ab</sub>/B)<sup>1/γ</sup> − 1)] / (r<sub>ab</sub>² + η²) · (<b>r</b><sub>ab</sub>·∇<sub>a</sub>W<sub>ab</sub>) m<sub>b</sub>/ρ<sub>b</sub><span class="n">(4) 밀도 확산 (Fourtakas, δ = 0.1)</span></div>
+<div class="eq">d<b>v</b><sub>a</sub>/dt = −Σ<sub>b</sub> m<sub>b</sub> [(P<sub>a</sub>+P<sub>b</sub>)/(ρ<sub>a</sub>ρ<sub>b</sub>) + Π<sub>ab</sub>] ∇<sub>a</sub>W<sub>ab</sub> + <b>g</b><span class="n">(5) 운동량</span></div>
+<div class="eq">Π<sub>ab</sub> = −α c<sub>0</sub> h (<b>r</b><sub>ab</sub>·<b>v</b><sub>ab</sub>) / [(r<sub>ab</sub>² + η²) ρ̄<sub>ab</sub>]  (<b>r</b>·<b>v</b> &lt; 0 일 때),  η² = (0.1h)²<span class="n">(6) 인공 점성</span></div>
+<div class="eq">층류: d<b>v</b><sub>a</sub>/dt += Σ<sub>b</sub> m<sub>b</sub> 4ν (<b>r</b><sub>ab</sub>·∇<sub>a</sub>W<sub>ab</sub>) / [(r<sub>ab</sub>² + η²)(ρ<sub>a</sub>+ρ<sub>b</sub>)] <b>v</b><sub>ab</sub><span class="n">(7) 층류 점성</span></div>
+<div class="eq">P = B [(ρ/ρ<sub>0</sub>)<sup>γ</sup> − 1],  B = c<sub>0</sub>²ρ<sub>0</sub>/γ,  c<sub>0</sub> = 20 √(g·H<sub>swl</sub>),  γ = 7<span class="n">(8) Tait 상태방정식</span></div>
+<p class="where">GPU 안에서는 ρ/ρ<sub>0</sub>, P/ρ<sub>0</sub>, 입자 부피 dp³ 만 다루고 ρ<sub>0</sub> 는 출력할 때만 곱합니다 (float32 아래넘침 방지). 위치는 CPU·CUDA 에서 float64, Metal 에서 float32 입니다.</p>
+<h3 id="sph-bc">4-3. 벽 경계 (DBC · mDBC)</h3>
+<p><b>DBC</b>: 벽 안쪽 경계 입자도 연속 방정식으로 밀도가 오르내리며(ρ<sub>0</sub> 아래로는 내려가지 않음) 압력으로 유체를 밀어냅니다. 빠르지만 벽 바로 옆 두 층의 압력이 틀리고 벽 근처에 틈이 생깁니다.</p>
+<p><b>mDBC</b>: 각 경계 입자의 벽면 반대편 대칭점(고스트 점)에서 주변 유체 입자로 밀도와 기울기를 1차 정확도로 보간(4×4 보정 행렬, 행렬식 &lt; 10⁻³ 이면 0차)해 경계 입자 밀도로 씁니다. 형상에서 법선을 자동으로 계산하고, 얇은 벽은 유체에서 가까운(젖는) 쪽 면을 고릅니다. 기본값입니다.</p>
 <h3 id="sph-time">4-4. 시간적분</h3>
-<p>Symplectic 예측-수정 적분에 가변 시간간격을 씁니다. Δt 는 힘 조건, 음속·점성 조건 중 작은 값에 CFL 계수를 곱해 정합니다.</p>
+<p>Symplectic: 예측 (Δt/2 로 위치·속도·밀도) → 이웃 재탐색 → 다시 힘 계산 → 보정 (밀도는 ρ<sub>n+1</sub> = ρ<sub>n</sub>(2−ε)/(2+ε), ε = −(dρ/dt / ρ)Δt, 위치는 두 속도의 평균).</p>
+<div class="eq">Δt = CFL · min( √(h/|a|<sub>max</sub>),  h / (max(c<sub>0</sub>, 10|v|<sub>max</sub>) + h·max(<b>r</b>·<b>v</b>/(r²+η²))) ),  CFL = 0.2<span class="n">(9)</span></div>
+<p>밀도가 0.7ρ<sub>0</sub> ~ 1.3ρ<sub>0</sub> 를 벗어나거나 해석 영역 밖으로 나간 입자는 제외합니다 (DualSPHysics 와 같음).</p>
+<h3 id="sph-out">4-5. 결과 표시</h3>
+<p>출력 시점마다 입자 값을 정해진 격자(약 6만 점)에 Shepard 보간해 단면 색, 단면 벡터, 단면 유선, 와도(격자 중심차분), Q-criterion 등치면을 만듭니다. 프로브는 같은 보간으로 그 점의 속도·압력을 기록하고, 벽 하중은 유체 입자가 경계 입자에게 받는 압력·점성 힘의 반작용 합입니다.</p>
 
 <h2 id="case">5. 케이스 구성</h2>
 <table>

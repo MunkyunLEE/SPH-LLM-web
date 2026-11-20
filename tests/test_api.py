@@ -14,6 +14,8 @@ def test_pages():
     assert c.get("/").status_code == 200
     assert c.get("/app.js").status_code == 200
     assert c.get("/core/js/panel.js").status_code == 200
+    assert c.get("/core/js/fields.js").status_code == 200
+    assert c.get("/results.js").status_code == 200
     assert c.get("/theory.html").status_code == 200
 
 
@@ -42,9 +44,10 @@ def test_upload_units():
     assert np.isclose(s["model"]["bbox"][1][2], 460000.0)
 
 
-def test_solve_not_yet():
-    r = c.post("/api/solve")
-    assert r.status_code == 501
+def test_run_endpoints_idle():
+    assert c.get("/api/run").json()["state"] in ("idle", "done", "error", "stopped")
+    assert c.post("/api/run/pause").status_code == 409
+    assert c.get("/api/run/frame/0").status_code in (404, 200)
 
 
 def test_results_roundtrip(tmp_path):

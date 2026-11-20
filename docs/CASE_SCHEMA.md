@@ -10,7 +10,7 @@
   "fluid": {"preset": "water", "name": "물 20°C", "rho0": 9.98e-10, "mu": 1.002e-9},
   "particle": {"dx": 10.0},
   "gravity": [0, 0, -9810],
-  "solver": {"method": "wcsph", "t_end": 2.0, "fps": 30, "cfl": 0.4, "tol_density": 0.05, "tol_divergence": 0.1, "max_iter": 100, "viscosity": "artificial", "alpha": 0.02},
+  "solver": {"method": "wcsph", "t_end": 2.0, "fps": 30, "cfl": 0.2, "viscosity": "artificial", "alpha": 0.02, "boundary": "mdbc", "ddt": 0.1},
   "device": "auto",
   "bodies": [{"group": "tank", "role": "wall", "motion": "fixed"}],
   "fluid_blocks": [{"id": "fb1", "name": "물기둥", "box": {"min": [...], "max": [...]}}],
@@ -28,7 +28,7 @@
 |---|---|
 | set_fluid | preset 또는 rho0, mu |
 | set_particle | dx |
-| set_solver | t_end, fps, cfl, method, alpha, tol_density, tol_divergence, max_iter |
+| set_solver | t_end, fps, cfl, method (wcsph), alpha, viscosity (artificial·laminar), boundary (mdbc·dbc), ddt |
 | set_device | device: auto, cuda, metal, vulkan, cpu |
 | set_gravity | vector |
 | set_domain | min, max 또는 fit, margin |
@@ -38,6 +38,7 @@
 | set_body | group, role: wall, ignore |
 | add_plot | title, x, series (quantity) |
 | add_stop | quantity, cmp, value, action |
+| add_probe | point [x, y, z] mm, name → `monitors` (속도·압력 시계열) |
 | update / remove / clear | id / id / what |
 | replace_spec | spec (케이스 불러오기) |
 

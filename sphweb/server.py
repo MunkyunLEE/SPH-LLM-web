@@ -6,7 +6,8 @@ import numpy as np
 from simweb import app as core
 from simweb import llm
 
-from . import __version__, prompt, rules, spec
+from . import __version__, prompt, results, rules, spec
+from .runner import Runner
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 llm.PREFIXES[:] = ["SPHWEB", "SIMWEB"]
@@ -59,7 +60,8 @@ class Plugin:
         return prompt.context(geom, sp, result)
 
     def state(self, S):
-        return {"estimate": spec.estimate(S["spec"]), "engine": ENGINE["info"], "result": None}
+        r = RUNNER.status()
+        return {"estimate": spec.estimate(S["spec"]), "engine": ENGINE["info"], "run": {k: r[k] for k in ("state", "message", "t", "t_end", "frames", "dir")}}
 
     def tools(self):
         info = ENGINE["info"]
@@ -86,9 +88,60 @@ class Plugin:
 
         @app.post("/api/solve")
         def solve():
-            fail("해석 엔진은 2단계에서 연결합니다. 지금은 케이스 설정과 미리보기만 됩니다", 501)
+            from .engine import backend
+
+            with lock:
+                sp, geom = S["spec"], S.get("geom")
+                warns = [w for w in spec.warnings_for(sp, geom) if w.get("level") == "err"]
+            if warns:
+                fail(warns[0]["text"], 400)
+            dev = sp.get("device", "auto")
+            arch = backend.choose(dev) if dev != "cpu" else "cpu"
+            if not arch:
+                fail(f"계산 장치 {dev} 를 쓸 수 없습니다. 자동 또는 CPU 로 바꿔 주세요", 400)
+            try:
+                RUNNER.start(sp, geom, arch)
+            except RuntimeError as e:
+                fail(str(e), 409)
+            return RUNNER.status()
+
+        @app.get("/api/run")
+        def run_status(since: int = 0):
+            st = RUNNER.status()
+            if since:
+                st["series"] = {k: v[since:] for k, v in st["series"].items()}
+                st["since"] = since
+            return st
+
+        @app.post("/api/run/{what}")
+        def run_control(what: str):
+            try:
+                RUNNER.control(what)
+            except (RuntimeError, ValueError) as e:
+                fail(str(e), 409)
+            return RUNNER.status()
+
+        @app.get("/api/run/frame/{k}")
+        def run_frame(k: int):
+            from fastapi import Response
+
+            try:
+                return Response(RUNNER.frame_bytes(k), media_type="application/octet-stream")
+            except (FileNotFoundError, IndexError) as e:
+                fail(str(e), 404)
+
+        @app.get("/api/run/pack")
+        def run_pack():
+            from fastapi.responses import FileResponse
+
+            st = RUNNER.status()
+            if not st["dir"]:
+                fail("결과가 없습니다", 404)
+            out = results.pack(st["dir"], os.path.join(st["dir"], "rhino_pack.npz"))
+            return FileResponse(out, filename=os.path.basename(st["dir"]) + "_rhino.npz")
 
 
 ENGINE = {"info": None}
+RUNNER = Runner(os.environ.get("SPHWEB_RUNS", os.path.join(ROOT, "runs")))
 plugin = Plugin()
 app = core.create_app(plugin)

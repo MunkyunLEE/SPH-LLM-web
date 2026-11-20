@@ -1,6 +1,7 @@
 import { $, el, fmt, api } from '/core/js/util.js';
 import { createViewer, THREE } from '/core/js/viewer.js';
 import { mountRight } from '/core/js/panel.js';
+import { mountResults } from './results.js';
 
 const COL = { domain: 0x8492a6, fluid: 0x4cc2ff, inlet: 0x57d9a3, outlet: 0xff6b6b, sel: 0xffc857 };
 let st = null;
@@ -49,7 +50,10 @@ function renderControls() {
   setNum('rho0', s.fluid.rho0);
   setNum('mu', s.fluid.mu);
   setNum('dx', s.particle.dx);
-  $('method').value = s.solver.method;
+  $('boundary').value = s.solver.boundary || 'mdbc';
+  $('viscosity').value = s.solver.viscosity || 'artificial';
+  setNum('alpha', s.solver.alpha);
+  $('alpha').disabled = $('viscosity').value === 'laminar';
   $('device').value = s.device;
   setNum('tEnd', s.solver.t_end);
   setNum('fps', s.solver.fps);
@@ -164,6 +168,8 @@ function renderLists() {
   }
   const ol = L('outList', 'outCount', s.outlets, '없음');
   for (const b of s.outlets) item(ol, b, b.name, '이 영역에 들어간 입자는 제거', boxEdit(b));
+  const ml = L('moList', 'moCount', s.monitors, '없음. 좌표로 추가하면 속도·압력 시계열이 그려집니다');
+  for (const m of s.monitors) item(ml, m, m.name, `(${m.point.map(fmt).join(', ')}) mm`, vecEdit(m.id, 'point', m.point, '위치'));
   const sl = L('stList', 'stCount', s.stops, '없음');
   for (const t of s.stops) item(sl, t, `${t.quantity} ${t.cmp} ${fmt(t.value)}`, '조건을 만족하면 일시정지');
   const w = $('warnings');
@@ -196,6 +202,7 @@ function buildSymbols() {
   for (const b of s.fluid_blocks) gSym.add(V.boxLines(b.box.min, b.box.max, sel === b.id ? COL.sel : COL.fluid));
   for (const b of s.outlets) gSym.add(V.boxLines(b.box.min, b.box.max, sel === b.id ? COL.sel : COL.outlet));
   const L = V.diag * 0.12;
+  for (const m of s.monitors) gSym.add(V.points(m.point, [1, 0.78, 0.34], 9));
   for (const it of s.inlets) {
     gSym.add(patch(it));
     gSym.add(V.arrow(it.center, it.normal, L, sel === it.id ? COL.sel : COL.inlet));
@@ -301,7 +308,14 @@ function bind() {
   $('rho0').onchange = (e) => ops([{ op: 'set_fluid', rho0: +e.target.value }]);
   $('mu').onchange = (e) => ops([{ op: 'set_fluid', mu: +e.target.value }]);
   $('dx').onchange = (e) => ops([{ op: 'set_particle', dx: +e.target.value }]);
-  $('method').onchange = (e) => ops([{ op: 'set_solver', method: e.target.value }]);
+  $('boundary').onchange = (e) => ops([{ op: 'set_solver', boundary: e.target.value }]);
+  $('viscosity').onchange = (e) => ops([{ op: 'set_solver', viscosity: e.target.value }]);
+  $('alpha').onchange = (e) => ops([{ op: 'set_solver', alpha: +e.target.value }]);
+  $('prAdd').onclick = () => {
+    const p = ['prX', 'prY', 'prZ'].map((i) => +$(i).value);
+    if (p.some((v) => !Number.isFinite(v))) return note('프로브 좌표를 입력해 주세요', true);
+    ops([{ op: 'add_probe', point: p }]);
+  };
   $('device').onchange = (e) => ops([{ op: 'set_device', device: e.target.value }]);
   $('tEnd').onchange = (e) => ops([{ op: 'set_solver', t_end: +e.target.value }]);
   $('fps').onchange = (e) => ops([{ op: 'set_solver', fps: +e.target.value }]);
@@ -313,13 +327,6 @@ function bind() {
   $('undo').onclick = async () => {
     try {
       await refresh(await api('/api/undo', { method: 'POST' }));
-    } catch (e) {
-      note(e.message, true);
-    }
-  };
-  $('solve').onclick = async () => {
-    try {
-      await api('/api/solve', { method: 'POST' });
     } catch (e) {
       note(e.message, true);
     }
@@ -345,6 +352,7 @@ function bind() {
 
 async function start() {
   bind();
+  mountResults(V, { note });
   V.start();
   await loadExamples();
   await refresh(await api('/api/state'));

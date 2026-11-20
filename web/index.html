@@ -28,7 +28,8 @@
     </section>
     <section>
       <h2>해석</h2>
-      <div class="row two"><label>방법<select id="method"><option value="wcsph">WCSPH (DualSPHysics 식)</option><option value="dfsph">DFSPH (비교용)</option></select></label><label>계산 장치<select id="device"><option value="auto">자동</option><option value="cuda">CUDA</option><option value="metal">Metal</option><option value="vulkan">Vulkan</option><option value="cpu">CPU</option></select></label></div>
+      <div class="row two"><label>경계 조건<select id="boundary"><option value="mdbc">mDBC (정밀)</option><option value="dbc">DBC (빠름)</option></select></label><label>계산 장치<select id="device"><option value="auto">자동</option><option value="cuda">CUDA</option><option value="metal">Metal</option><option value="vulkan">Vulkan</option><option value="cpu">CPU</option></select></label></div>
+      <div class="row two"><label>점성<select id="viscosity"><option value="artificial">인공 점성 α</option><option value="laminar">층류 (μ 사용)</option></select></label><label>α<input id="alpha" type="number" step="0.005" min="0"></label></div>
       <div class="row three"><label>해석 시간 (s)<input id="tEnd" type="number" step="any" min="0"></label><label>출력 (프레임/s)<input id="fps" type="number" step="1" min="1"></label><label>CFL<input id="cfl" type="number" step="0.05" min="0" max="1"></label></div>
       <div class="row two"><label>중력 z (mm/s²)<input id="gz" type="number" step="any"></label><span></span></div>
     </section>
@@ -47,6 +48,10 @@
       <div id="inList" class="list"></div>
       <h2>유출 영역 <small id="outCount"></small></h2>
       <div id="outList" class="list"></div>
+      <h2>프로브 <small id="moCount"></small></h2>
+      <div id="moList" class="list"></div>
+      <div class="row three"><label>x<input id="prX" type="number" step="any"></label><label>y<input id="prY" type="number" step="any"></label><label>z<input id="prZ" type="number" step="any"></label></div>
+      <div class="row"><button id="prAdd" class="ghost">프로브 추가</button></div>
       <h2>정지 조건 <small id="stCount"></small></h2>
       <div id="stList" class="list"></div>
       <div id="warnings"></div>
@@ -54,8 +59,24 @@
     </section>
     <section class="run">
       <button id="solve" class="primary">해석 실행</button>
+      <div class="row three"><button id="pause" class="ghost" disabled>일시정지</button><button id="stepOne" class="ghost" disabled>한 스텝</button><button id="stopRun" class="ghost" disabled>정지</button></div>
+      <div class="progress"><div id="runBar"></div></div>
+      <div id="runState" class="info"></div>
+      <button id="pack" class="ghost" hidden>Rhino 용 결과 (npz)</button>
       <div class="row two"><a id="expSpec" class="btn ghost" href="/api/export/spec">케이스 JSON</a><label class="btn ghost file-btn">케이스 불러오기<input id="impSpec" type="file" accept=".json" hidden></label></div>
       <div id="solveMsg" class="info"></div>
+    </section>
+    <section>
+      <h2>결과 표시 <small>계산 중에도 갱신</small></h2>
+      <div class="row two"><label>색 범위<select id="rangeMode"><option value="frame">프레임마다</option><option value="fixed">고정</option></select></label><label>입자 크기<input id="psize" type="number" min="1" max="10" value="3"></label></div>
+      <div class="row two"><label class="check"><input type="checkbox" id="showPart" checked>입자</label><span></span></div>
+      <div class="slicerow"><label class="check"><input type="checkbox" id="slX">X 단면</label><input id="slXv" type="range" min="0" max="1000" value="500"></div>
+      <div class="slicerow"><label class="check"><input type="checkbox" id="slY">Y 단면</label><input id="slYv" type="range" min="0" max="1000" value="500"></div>
+      <div class="slicerow"><label class="check"><input type="checkbox" id="slZ">Z 단면</label><input id="slZv" type="range" min="0" max="1000" value="200"></div>
+      <div class="row three"><label class="check"><input type="checkbox" id="showVec">벡터</label><label>간격<input id="vecStride" type="number" min="1" max="20" value="2"></label><span></span></div>
+      <div class="row three"><label class="check"><input type="checkbox" id="showStream">유선</label><label>단면<select id="streamPlane"><option value="Y">Y</option><option value="X">X</option><option value="Z">Z</option></select></label><label>밀도<input id="streamDens" type="number" min="1" max="10" value="4"></label></div>
+      <div class="row three"><label class="check"><input type="checkbox" id="showIso">Q 등치면</label><label>Q 수준 %<input id="qLevel" type="number" min="0.5" max="100" step="0.5" value="8"></label><span></span></div>
+      <div id="isoInfo" class="info"></div>
     </section>
   </aside>
   <main>

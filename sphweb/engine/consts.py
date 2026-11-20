@@ -17,6 +17,7 @@ class Params:
     gamma: float = 7.0
     cfl: float = 0.2
     visco: float = 0.1
+    visco_type: str = "artificial"
     visco_bound: float = 1.0
     ddt: float = 0.1
     rho_min: float = 0.7

@@ -4,3 +4,8 @@
 .item select{padding:2px 4px;font-size:11px;width:auto}
 #warnings div.info{color:var(--mute)}
 .swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.progress{height:6px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;overflow:hidden;margin:6px 0}
+#runBar{height:100%;width:0;background:var(--accent);transition:width .3s}
+.slicerow{display:grid;grid-template-columns:90px 1fr;align-items:center;gap:8px}
+.slicerow label.check{padding:0}
+#summary{white-space:pre-wrap;font-size:12px;color:var(--text);padding:10px 14px}

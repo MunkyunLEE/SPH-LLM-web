@@ -20,6 +20,11 @@ CASES = [
     ("CPU로 계산해", [{"op": "set_device", "device": "cpu"}]),
     ("밀도 1000 kg/m3", [{"op": "set_fluid", "rho0": pytest.approx(1e-9)}]),
     ("해석 영역 맞춰줘", [{"op": "set_domain", "fit": True}]),
+    ("DBC로 바꿔줘", [{"op": "set_solver", "boundary": "dbc"}]),
+    ("mDBC 경계로 해줘", [{"op": "set_solver", "boundary": "mdbc"}]),
+    ("층류 점성으로 바꿔", [{"op": "set_solver", "viscosity": "laminar"}]),
+    ("인공 점성 0.05로 해줘", [{"op": "set_solver", "viscosity": "artificial", "alpha": 0.05}]),
+    ("(1000, 300, 40) mm 에 프로브 추가해줘", [{"op": "add_probe", "point": [1000.0, 300.0, 40.0]}]),
 ]
 
 

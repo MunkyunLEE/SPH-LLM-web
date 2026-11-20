@@ -31,7 +31,7 @@ def default_spec(geom=None):
         "fluid": {"preset": "water", "name": f["name"], "rho0": f["rho"], "mu": f["mu"]},
         "particle": {"dx": dx},
         "gravity": [0.0, 0.0, -units.G],
-        "solver": {"method": "wcsph", "t_end": 2.0, "fps": 30, "cfl": 0.4, "tol_density": 0.05, "tol_divergence": 0.1, "max_iter": 100, "viscosity": "artificial", "alpha": 0.02},
+        "solver": {"method": "wcsph", "t_end": 2.0, "fps": 30, "cfl": 0.2, "viscosity": "artificial", "alpha": 0.02, "boundary": "mdbc", "ddt": 0.1},
         "device": "auto",
         "bodies": bodies,
         "fluid_blocks": [],
@@ -159,17 +159,27 @@ def apply_ops(spec, ops, geom=None):
             log.append(f"입자 간격 {spec['particle']['dx']:g} mm")
         elif op == "set_solver":
             s = spec["solver"]
-            for k in ("t_end", "cfl", "tol_density", "tol_divergence", "alpha"):
+            for k in ("t_end", "cfl", "alpha"):
                 if o.get(k) is not None:
                     s[k] = _pos(o[k], k)
+            if o.get("ddt") is not None:
+                s["ddt"] = float(o["ddt"])
+                if s["ddt"] < 0:
+                    raise ValueError("밀도 확산 계수는 0 이상입니다")
             if o.get("fps") is not None:
                 s["fps"] = int(_pos(o["fps"], "fps"))
-            if o.get("max_iter") is not None:
-                s["max_iter"] = int(_pos(o["max_iter"], "max_iter"))
             if o.get("method") is not None:
-                if o["method"] not in ("dfsph", "wcsph"):
-                    raise ValueError("해석 방법은 dfsph 또는 wcsph 입니다")
+                if o["method"] != "wcsph":
+                    raise ValueError("해석 방법은 wcsph (DualSPHysics 식) 입니다")
                 s["method"] = o["method"]
+            if o.get("viscosity") is not None:
+                if o["viscosity"] not in ("artificial", "laminar"):
+                    raise ValueError("점성은 artificial (인공 점성) 또는 laminar (층류) 입니다")
+                s["viscosity"] = o["viscosity"]
+            if o.get("boundary") is not None:
+                if o["boundary"] not in ("dbc", "mdbc"):
+                    raise ValueError("경계 조건은 dbc 또는 mdbc 입니다")
+                s["boundary"] = o["boundary"]
             if s["cfl"] > 1:
                 raise ValueError("CFL 계수는 1 이하여야 합니다")
             log.append(f"해석 시간 {s['t_end']:g} s, 출력 {s['fps']} 프레임/s")
@@ -220,6 +230,10 @@ def apply_ops(spec, ops, geom=None):
             it = {"id": _next_id(spec, "plots"), **_plot(o)}
             spec["plots"].append(it)
             log.append(f"{it['id']} 그래프 추가")
+        elif op == "add_probe":
+            it = {"id": _next_id(spec, "monitors"), "name": str(o.get("name") or f"프로브 {len(spec['monitors']) + 1}"), "point": _vec(o["point"], 3, "프로브 위치").tolist()}
+            spec["monitors"].append(it)
+            log.append(f"{it['id']} 프로브 ({', '.join(f'{v:g}' for v in it['point'])}) mm")
         elif op == "add_stop":
             if o.get("quantity") not in QUANTITIES:
                 raise ValueError(f"정지 조건 항목 '{o.get('quantity')}' 을(를) 모릅니다")
@@ -239,6 +253,8 @@ def apply_ops(spec, ops, geom=None):
                 spec[key][i] = {"id": cur["id"], "name": str(merged.get("name", cur["name"])), **_inlet(merged, dx)}
             elif key in ("fluid_blocks", "outlets"):
                 spec[key][i] = {**cur, **({"name": str(patch["name"])} if "name" in patch else {}), **({"box": _box(patch["box"])} if "box" in patch else {})}
+            elif key == "monitors":
+                spec[key][i] = {**cur, **({"name": str(patch["name"])} if "name" in patch else {}), **({"point": _vec(patch["point"], 3, "프로브 위치").tolist()} if "point" in patch else {})}
             else:
                 spec[key][i] = {**cur, **patch}
             log.append(f"{o['id']} 수정")

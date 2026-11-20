@@ -67,7 +67,7 @@ def main():
         "dam_break": {
             "title": "3D 댐 붕괴 (탱크 1600×600×600)",
             "file": "dam_tank.obj",
-            "note": "물기둥 400×600×300 mm. 2단계 검증 기준 (Martin & Moyce 1952, DualSPHysics CaseDambreak 과 비교 예정)",
+            "note": "물기둥 400×600×300 mm (DualSPHysics CaseDambreak 과 같은 물기둥). 입자 간격 10 mm 면 유체 7만 2천 개라 GPU 권장, CPU 에서는 20 mm 로 키우면 빠르게 볼 수 있습니다",
             "prompts": ["입자 간격 10 mm", "해석 시간 1.5초", "x 0~400, y 0~600, z 0~300 mm 에 물 채워줘"],
             "ops": [{"op": "set_particle", "dx": 10}, {"op": "set_solver", "t_end": 1.5, "fps": 50}, {"op": "set_domain", "min": [-100, -100, -100], "max": [1700, 700, 800]}, {"op": "add_fluid_block", "name": "물기둥", "box": {"min": [0, 0, 0], "max": [400, 600, 300]}}],
         },

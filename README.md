@@ -13,17 +13,19 @@
 - 계산 수식은 [DualSPHysics](https://github.com/DualSPHysics/DualSPHysics) v5.4 를 기준으로 직접 구현하고, 같은 장면을 원본 DualSPHysics 로 돌려 교차검증합니다.
 - 단위는 FEM-LLM-web 과 같은 **mm · tonne · s · N · MPa** 입니다.
 
-## 현재 상태 (1단계)
+## 현재 상태 (2단계 완료)
 
 | 항목 | 상태 |
 |---|---|
 | 화면 (FEM 배치), 예제 3종, OBJ·STL 업로드, 파일 단위 변환 | 됨 |
 | 케이스 스키마 v1, 수정 지시 검증, 입자 수 추정, 경고 | 됨 |
-| 규칙 해석기 (유체, 입자 간격, 시간, 장치, 중력, 유체 블록, 유입구, 유출 영역, 삭제, 되돌리기, 실행) | 됨 |
-| LLM 연결 (OpenAI 호환 엔드포인트 + API 키) | 됨 (모의 서버로 시험, 실제 API 미확인) |
-| 계산 장치 확인 (Taichi CUDA · Metal · Vulkan · CPU) + 간이 벤치마크 | 됨 (이 저장소 개발 환경에서는 CPU 만 확인) |
-| 결과 형식 v1 (입자 ID 고정 이력) | 됨 |
-| 해석 엔진 | 2단계 |
+| 규칙 해석기, LLM 연결 (OpenAI 호환 엔드포인트 + API 키) | 됨 (LLM 은 모의 서버로 시험, 실제 API 미확인) |
+| 계산 코어: Taichi WCSPH, DualSPHysics v5.4 와 같은 식 (Wendland, Tait, 인공·층류 점성, DDT Fourtakas, DBC·mDBC, Symplectic, 가변 dt) | 됨 (정수압·댐 붕괴로 원본 DualSPHysics 와 교차검증) |
+| 닫힌 형상 → 경계 입자 + mDBC 법선 자동 생성, 유체 블록 채우기 | 됨 (얇은 판·열린 표면, 유입·유출은 3단계) |
+| 해석 중 실시간 화면, 일시정지 · 한 스텝 · 정지, 정지 조건 | 됨 |
+| 결과 표시 (속도·성분·압력·와도·Q-criterion, 입자·단면·벡터·유선·Q 등치면, 프로브, 벽 하중, 밀도 오차·에너지 그래프) | 됨 |
+| 결과 형식 v1 (입자 ID 고정 이력), Rhino 용 npz 묶기 | 됨 |
+| 검증 스크립트 `validation/` (정수압, 3D 댐 붕괴, 원본 DualSPHysics 비교) | 됨 |
 
 ## 설치와 실행 (WSL Ubuntu · Mac 공통)
 

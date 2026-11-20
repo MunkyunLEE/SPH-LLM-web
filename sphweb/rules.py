@@ -93,7 +93,7 @@ def parse(text, geom=None, spec=None):
     for m in re.finditer(rf"밀도\s*({NUM})\s*(kg/m3|kg/m³|g/cm3|g/cm³|tonne/mm3)?", t):
         p.ops.append({"op": "set_fluid", "rho0": units.to_internal(float(m.group(1)), m.group(2) or "kg/m3", "density")[0]})
         p.take(m)
-    for m in re.finditer(rf"점성(?:계수)?\s*({NUM})\s*(Pa·s|Pa\*s|Pa s|mPa·s|mPa\*s|cP|MPa·s)?", t):
+    for m in re.finditer(rf"(?<!인공\s)(?<!인공)점성(?:계수)?\s*({NUM})\s*(Pa·s|Pa\*s|Pa s|mPa·s|mPa\*s|cP|MPa·s)?", t):
         u = (m.group(2) or "Pa·s").replace("Pa s", "Pa·s")
         p.ops.append({"op": "set_fluid", "mu": units.to_internal(float(m.group(1)), u, "dynamic_viscosity")[0]})
         p.take(m)
@@ -112,6 +112,27 @@ def parse(text, geom=None, spec=None):
     for m in re.finditer(rf"cfl\s*(?:을|를)?\s*({NUM})", t, re.I):
         p.ops.append({"op": "set_solver", "cfl": float(m.group(1))})
         p.take(m)
+
+    for m in re.finditer(r"(mdbc|dbc)\s*(?:경계)?\s*(?:로|으로)?\s*(?:바꿔|설정|해|써|사용)?", t, re.I):
+        p.ops.append({"op": "set_solver", "boundary": m.group(1).lower()})
+        p.take(m)
+    for m in re.finditer(r"층류\s*점성\s*(?:으로|로)?\s*(?:바꿔|설정|해|써|사용)?", t):
+        p.ops.append({"op": "set_solver", "viscosity": "laminar"})
+        p.take(m)
+    for m in re.finditer(rf"인공\s*점성(?:\s*(?:계수|α|알파))?\s*(?:을|를|은|는)?\s*({NUM})?\s*(?:으로|로)?\s*(?:바꿔|설정|해|써|사용)?", t):
+        o = {"op": "set_solver", "viscosity": "artificial"}
+        if m.group(1):
+            o["alpha"] = float(m.group(1))
+        p.ops.append(o)
+        p.take(m)
+    if re.search(r"프로브|측정\s*점|모니터", t):
+        pt, m = _point(t)
+        if pt:
+            p.ops.append({"op": "add_probe", "point": pt})
+            p.take(m)
+            p.take(re.search(r"(?:에|에서)?\s*(?:프로브|측정\s*점|모니터)\s*(?:추가|넣어|만들어|둬|설치)?\S*", t))
+        else:
+            p.ask.append("프로브 위치를 (x, y, z) mm 로 알려 주세요")
 
     for m in re.finditer(r"(GPU|gpu|CUDA|cuda|Metal|metal|CPU|cpu|자동)\s*(?:로|으로)\s*(?:계산|돌려|해석|설정|바꿔)?", t):
         d = {"gpu": "auto", "cuda": "cuda", "metal": "metal", "cpu": "cpu", "자동": "auto"}[m.group(1).lower()]
