@@ -112,8 +112,8 @@ class Runner:
         lam = sol.get("viscosity") == "laminar"
         visco = float(spec["fluid"]["mu"]) / rho0 if lam else float(sol.get("alpha", 0.02))
         p = Params(dp=dx, hswl=hswl, rho0=rho0, gravity=tuple(spec["gravity"]), cfl=float(sol.get("cfl", 0.2)), visco=visco, visco_type="laminar" if lam else "artificial", ddt=float(sol.get("ddt", 0.1)), dim=case["dim"], scheme=sol.get("scheme", "symplectic"), coefsound=float(sol.get("coefsound", 20.0)))
-        s = wcsph.Solver(p, fluid, bound, domain=(lo, hi), bound_normals=case["normals"] if mdbc and len(bound) else None, cell_div=2)
-        s.hydrostatic(zs, bound=False)
+        s = wcsph.Solver(p, fluid, bound, domain=(lo, hi), bound_normals=case["normals"] if mdbc and len(bound) else None, cell_div=2, pos64=False if os.environ.get("SPHWEB_FORCE_F32") else None, solid=case.get("solid"))
+        s.hydrostatic(case["zsurf"] if len(case.get("zsurf", [])) == len(fluid) else zs, bound=False)
         stamp = time.strftime("%Y%m%d-%H%M%S")
         out = os.path.join(self.root, stamp)
         ginfo, gpts = grid_for(lo, hi, dx, case["dim"])
@@ -169,7 +169,7 @@ class Runner:
             with self.lock:
                 for k, v in vals.items():
                     self.st["series"].setdefault(k, []).append(v)
-                self.st.update(t=s.time, step=s.nstep, dt=info["dt"], wall=info["wall"], frames=len(w.meta["frames"]), out=info["out"])
+                self.st.update(t=s.time, step=s.nstep, dt=info["dt"], wall=info["wall"], frames=len(w.meta["frames"]), out=info["out"], out_wall=info["out_wall"])
             return vals
 
         def stop_hit(vals):

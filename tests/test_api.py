@@ -21,7 +21,7 @@ def test_pages():
 
 def test_examples_listed_and_load():
     names = [e["name"] for e in c.get("/api/examples").json()]
-    assert names == ["dam_break", "funnel_jet", "origami_panels"]
+    assert names == ["dam_break", "funnel_jet", "origami_panels", "still_tank", "dambreak_obstacle", "drop_pool"]
     s = c.post("/api/examples/dam_break").json()
     assert s["model"]["closed"] and s["estimate"]["fill"] == 40 * 60 * 30
     p = c.get("/api/preview").json()

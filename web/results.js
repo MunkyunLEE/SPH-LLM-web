@@ -211,6 +211,7 @@ export function mountResults(V, opt) {
     if (r.n) lines_.push(`${p.dim === 2 ? '2D' : '3D'} · 유체 ${r.n.toLocaleString()} · 경계 ${r.nbound.toLocaleString()} 입자 · ${p.boundary || ''} · ${p.scheme || ''} · 음속 계수 ${p.coefsound || ''} · ${p.viscosity || ''} · 장치 ${r.device}`);
     if (p.h) lines_.push(`입자 간격 ${fmt(p.dp)} mm · 상호작용 반경 2h ${fmt(2 * p.h)} mm (이웃 약 ${p.neighbors}개) · 음속 ${fmt(p.cs0 / 1000)} m/s · 출력 ${r.frames} 프레임`);
     if (last('density.error.max') !== null) lines_.push(`밀도 오차 평균 ${(100 * last('density.error.mean')).toFixed(2)}% · 최대 ${(100 * last('density.error.max')).toFixed(2)}%`);
+    if (r.out) lines_.push(`제외된 입자 ${r.out.toLocaleString()}개 (벽을 뚫고 들어감 ${(r.out_wall || 0).toLocaleString()} · 해석 영역 밖·밀도 범위 이탈 ${(r.out - (r.out_wall || 0)).toLocaleString()})`);
     for (const w of r.warnings || []) lines_.push(`⚠ ${w}`);
     $('summary').textContent = lines_.filter(Boolean).join('\n');
   }

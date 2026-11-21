@@ -58,3 +58,41 @@ def test_fluid_without_geometry():
     sp, _ = S.apply_ops(sp, [{"op": "add_fluid_block", "box": {"min": [0, 0, 0], "max": [100, 100, 100]}}, {"op": "set_particle", "dx": 20}])
     r = casebuild.build(sp, None)
     assert len(r["fluid"]) == 125 and len(r["bound"]) == 0
+
+
+def _preset(name, extra=()):
+    pre = json.load(open(os.path.join(EX, "presets.json"), encoding="utf-8"))[name]
+    g = geometry.load(pre["file"], open(os.path.join(EX, pre["file"]), "rb").read(), "mm")
+    sp, _ = S.apply_ops(S.default_spec(g), pre["ops"] + list(extra), g)
+    return sp, g
+
+
+def test_still_tank_ghosts_all_in_cavity():
+    sp, g = _preset("still_tank")
+    r = casebuild.build(sp, g)
+    gh = r["bound"] + r["normals"]
+    assert np.all(((gh[:, 0] > 0) & (gh[:, 0] < 400) & (gh[:, 1] > 0) & (gh[:, 1] < 400) & (gh[:, 2] > 0)) | (gh[:, 2] > 400))
+
+
+def test_obstacle_groups_and_drop_blocks():
+    sp, g = _preset("dambreak_obstacle", [{"op": "set_particle", "dx": 25}])
+    r = casebuild.build(sp, g)
+    gh = r["bound"] + r["normals"]
+    ins = casebuild.make_inside(np.asarray(g.vertices, float), g.triangles()[0])
+    assert not ins(gh).any()
+    assert set(r["group_names"]) == {"tank", "building"} and len(set(r["group"])) == 2
+    b = r["fluid"]
+    assert not ((b[:, 0] > 900) & (b[:, 0] < 1020) & (b[:, 1] > 240) & (b[:, 1] < 360)).any()
+    sp, g = _preset("drop_pool")
+    r = casebuild.build(sp, g)
+    assert set(np.unique(r["zsurf"]).tolist()) == {-np.inf, 143.75}
+
+
+def test_solid_mask_marks_wall_interior():
+    sp, g = _preset("still_tank", [{"op": "set_particle", "dx": 10}])
+    r = casebuild.build(sp, g)
+    m = r["solid"]
+    idx = lambda p: tuple(int(round((p[k] - m["origin"][k]) / m["h"])) for k in range(3))
+    assert m["mask"][idx([200, 200, -15])]
+    assert not m["mask"][idx([200, 200, -5])]
+    assert not m["mask"][idx([200, 200, 100])]

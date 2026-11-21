@@ -8,6 +8,36 @@ from simweb.geometry import write_stl
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def tank_part(L, W, H, t=30.0):
+    o = [[-t, -t], [L + t, -t], [L + t, W + t], [-t, W + t]]
+    i = [[0, 0], [L, 0], [L, W], [0, W]]
+    v = [p + [-t] for p in o] + [p + [H] for p in o] + [p + [H] for p in i] + [p + [0] for p in i]
+    q = [[0, 3, 2, 1]]
+    q += [[k, (k + 1) % 4, 4 + (k + 1) % 4, 4 + k] for k in range(4)]
+    q += [[4 + k, 4 + (k + 1) % 4, 8 + (k + 1) % 4, 8 + k] for k in range(4)]
+    q += [[8 + k, 8 + (k + 1) % 4, 12 + (k + 1) % 4, 12 + k] for k in range(4)]
+    q += [[12, 13, 14, 15]]
+    return v, q
+
+
+def box_part(lo, hi):
+    x0, y0, z0 = lo
+    x1, y1, z1 = hi
+    v = [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0], [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]]
+    q = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]]
+    return v, q
+
+
+def write_obj(path, parts):
+    lines, off = [], 0
+    for name, (v, q) in parts:
+        lines.append(f"g {name}")
+        lines += [f"v {a:g} {b:g} {c:g}" for a, b, c in v]
+        lines += ["f " + " ".join(str(off + k + 1) for k in f) for f in q]
+        off += len(v)
+    open(path, "w").write("\n".join(lines) + "\n")
+
+
 def tank(path, L=1600.0, W=600.0, H=600.0, t=30.0):
     o = [[-t, -t], [L + t, -t], [L + t, W + t], [-t, W + t]]
     i = [[0, 0], [L, 0], [L, W], [0, W]]
@@ -63,6 +93,10 @@ def main():
     tank(os.path.join(HERE, "dam_tank.obj"))
     funnel(os.path.join(HERE, "funnel.stl"))
     origami(os.path.join(HERE, "origami_2x2.obj"))
+    write_obj(os.path.join(HERE, "still_tank.obj"), [("tank", tank_part(400.0, 400.0, 400.0))])
+    write_obj(os.path.join(HERE, "dambreak_obstacle.obj"), [("tank", tank_part(1600.0, 670.0, 400.0)), ("building", box_part([900.0, 240.0, 0.0], [1020.0, 360.0, 450.0]))])
+    write_obj(os.path.join(HERE, "drop_pool.obj"), [("tank", tank_part(800.0, 400.0, 600.0))])
+    rg = 0.998e-9 * 9810.0
     presets = {
         "dam_break": {
             "title": "3D 댐 붕괴 (탱크 1600×600×600)",
@@ -85,9 +119,30 @@ def main():
             "prompts": ["x 0~400, y 0~400, z 0~150 mm 에 물 채워줘", "입자 간격 8 mm"],
             "ops": [{"op": "set_particle", "dx": 8}, {"op": "set_domain", "min": [-100, -100, -50], "max": [500, 500, 500]}],
         },
+        "still_tank": {
+            "title": "정수압 탱크 (이론값 ρgh 확인)",
+            "file": "still_tank.obj",
+            "note": f"가만히 있는 물 400×400×300 mm. 정답: 바닥 근처 프로브 (200, 200, 20) 압력 ≈ {rg * 280:.5f} MPa, 중간 (200, 200, 150) ≈ {rg * 150:.5f} MPa (ρgh, 수면 z ≈ 300). 속도는 0 근처, 밀도 오차는 1% 안이면 정상. 처음 0.2 s 는 출렁이며 자리를 잡습니다",
+            "prompts": ["해석 시간 2초", "입자 2만 개로 해줘", "DBC로 바꿔줘"],
+            "ops": [{"op": "set_particle", "dx": 20}, {"op": "set_solver", "t_end": 1.0, "fps": 20}, {"op": "set_domain", "min": [-100, -100, -100], "max": [500, 500, 500]}, {"op": "add_fluid_block", "name": "고인 물", "box": {"min": [0, 0, 0], "max": [400, 400, 300]}}, {"op": "add_probe", "name": "바닥", "point": [200, 200, 20]}, {"op": "add_probe", "name": "중간", "point": [200, 200, 150]}],
+        },
+        "dambreak_obstacle": {
+            "title": "장애물 댐 붕괴 (DualSPHysics CaseDambreak)",
+            "file": "dambreak_obstacle.obj",
+            "note": "DualSPHysics 공식 예제 01_DamBreak 와 같은 장면: 탱크 1600×670×400, 물기둥 400×670×300, 기둥 장애물 120×120×450 (x 900~1020). 물이 약 0.35 s 에 기둥을 칩니다. 벽 하중 그래프의 building Fx 가 기둥이 받는 힘, 프로브는 원본 압력 측정점 (877.9, 300, 20). 원본 입자 간격 8.5 mm, 여기 기본 15 mm",
+            "prompts": ["입자 간격 10 mm", "해석 시간 1.6초", "Verlet으로 바꿔줘"],
+            "ops": [{"op": "set_particle", "dx": 15}, {"op": "set_solver", "t_end": 1.0, "fps": 50}, {"op": "set_domain", "min": [-100, -100, -100], "max": [1700, 770, 700]}, {"op": "add_fluid_block", "name": "물기둥", "box": {"min": [0, 0, 0], "max": [400, 670, 300]}}, {"op": "add_probe", "name": "기둥 앞 바닥", "point": [877.9, 300, 20]}, {"op": "add_probe", "name": "기둥 앞 중간", "point": [877.9, 300, 100]}],
+        },
+        "drop_pool": {
+            "title": "물 덩어리 낙하 → 수조",
+            "file": "drop_pool.obj",
+            "note": "수심 150 mm 수조에 200 mm 정육면체 물 덩어리가 바닥에서 350 mm 높이에서 떨어집니다. 정답: 수면(150)까지 200 mm 낙하 → 약 0.2 s 에 √(2gh) ≈ 1.98 m/s 로 충돌. 바닥 프로브 (400, 200, 20) 압력은 처음 ≈ " + f"{rg * 130:.5f}" + " MPa (ρgh) 에서 충돌 때 뛰어오릅니다",
+            "prompts": ["해석 시간 1.5초", "입자 5만 개로 해줘", "2D로 해석해줘"],
+            "ops": [{"op": "set_particle", "dx": 12.5}, {"op": "set_solver", "t_end": 1.0, "fps": 50}, {"op": "set_domain", "min": [-100, -100, -100], "max": [900, 500, 700]}, {"op": "add_fluid_block", "name": "수조 물", "box": {"min": [0, 0, 0], "max": [800, 400, 150]}}, {"op": "add_fluid_block", "name": "떨어지는 물", "box": {"min": [300, 100, 350], "max": [500, 300, 550]}}, {"op": "add_probe", "name": "충돌 바닥", "point": [400, 200, 20]}],
+        },
     }
     json.dump(presets, open(os.path.join(HERE, "presets.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-    print("dam_tank.obj, funnel.stl, origami_2x2.obj, presets.json")
+    print("dam_tank.obj, funnel.stl, origami_2x2.obj, still_tank.obj, dambreak_obstacle.obj, drop_pool.obj, presets.json")
 
 
 if __name__ == "__main__":

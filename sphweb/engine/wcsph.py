@@ -26,7 +26,7 @@ def init(arch="cpu", **kw):
 
 @ti.data_oriented
 class Solver:
-    def __init__(self, params: Params, fluid, bound, domain=None, fluid_vel=None, pos64=None, bound_normals=None, cell_div=1, batch=64):
+    def __init__(self, params: Params, fluid, bound, domain=None, fluid_vel=None, pos64=None, bound_normals=None, cell_div=1, batch=64, solid=None):
         self.p = params
         fluid = np.asarray(fluid, dtype=np.float64).reshape(-1, 3)
         bound = np.asarray(bound, dtype=np.float64).reshape(-1, 3)
@@ -110,6 +110,18 @@ class Solver:
         self.bsum = ti.field(ti.i32, self.nblk + 1)
         self.stat = ti.field(ti.f32, 4)
         self.nout = ti.field(ti.i32, ())
+        self.nwall = ti.field(ti.i32, ())
+        if solid is not None and np.asarray(solid["mask"]).any():
+            sm = np.asarray(solid["mask"], np.int32)
+            self.smo = [float(v) for v in solid["origin"]]
+            self.smh = float(solid["h"])
+        else:
+            sm = np.zeros((1, 1, 1), np.int32)
+            self.smo = [0.0, 0.0, 0.0]
+            self.smh = 1e30
+        self.smn = [int(v) for v in sm.shape]
+        self.smask = ti.field(ti.i32, tuple(self.smn))
+        self.smask.from_numpy(sm)
         self.fcount = ti.field(ti.i32, self.nscan)
         self.wetc = ti.field(ti.i32, self.nscan)
         self.dtv = ti.field(ti.f32, 4)
@@ -237,8 +249,16 @@ class Solver:
 
     def hydrostatic(self, zsurf, bound=True):
         z = self.pos.to_numpy()[:, 2].astype(np.float64)
+        pid = self.pid.to_numpy()
+        zf = np.asarray(zsurf, np.float64)
+        if zf.ndim:
+            zp = np.full(self.n, zf.max() if len(zf) else 0.0)
+            fl = pid >= self.nb
+            zp[fl] = zf[pid[fl] - self.nb]
+        else:
+            zp = float(zf)
         g = abs(self.p.gravity[2])
-        r = np.power(1.0 + g * np.clip(zsurf - z, 0, None) / self.p.b, 1.0 / self.p.gamma)
+        r = np.power(1.0 + g * np.clip(zp - z, 0, None) / self.p.b, 1.0 / self.p.gamma)
         if not bound:
             r[self.pid.to_numpy() < self.nb] = 1.0
         self.rho.from_numpy(r.astype(np.float32))
@@ -567,6 +587,18 @@ class Solver:
             self.vel[i] = ti.Vector([0.0, 0.0, 0.0])
             self.ace[i] = ti.Vector([0.0, 0.0, 0.0])
             self.nout[None] += 1
+        else:
+            x = self.pos[i]
+            a = int(ti.round((x[0] - self.smo[0]) / self.smh))
+            b = int(ti.round((x[1] - self.smo[1]) / self.smh))
+            c = int(ti.round((x[2] - self.smo[2]) / self.smh))
+            if 0 <= a < self.smn[0] and 0 <= b < self.smn[1] and 0 <= c < self.smn[2]:
+                if self.smask[a, b, c] == 1:
+                    self.kind[i] = OUT
+                    self.vel[i] = ti.Vector([0.0, 0.0, 0.0])
+                    self.ace[i] = ti.Vector([0.0, 0.0, 0.0])
+                    self.nout[None] += 1
+                    self.nwall[None] += 1
 
     def _one_step(self, k):
         if self.verlet:
@@ -698,4 +730,4 @@ class Solver:
         return out
 
     def info(self):
-        return {"time": self.time, "steps": self.nstep, "dt": self.dt_last, "wall": self.wall, "n": self.n, "nfluid": self.nf, "nbound": self.nb, "out": int(self.nout[None]), "dt_min_hits": self.dt_warn, "cells": self.ncell}
+        return {"time": self.time, "steps": self.nstep, "dt": self.dt_last, "wall": self.wall, "n": self.n, "nfluid": self.nf, "nbound": self.nb, "out": int(self.nout[None]), "out_wall": int(self.nwall[None]), "dt_min_hits": self.dt_warn, "cells": self.ncell}

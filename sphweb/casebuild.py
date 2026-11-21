@@ -54,12 +54,53 @@ def inside(points, V, F):
     return above % 2 == 1
 
 
-def wet_distance(lo, hi, dx, V, F, seeds, max_iter=2000):
+def components(F):
+    F = np.asarray(F, int)
+    if not len(F):
+        return np.zeros(0, int)
+    par = np.arange(F.max() + 1)
+
+    def find(a):
+        while par[a] != a:
+            par[a] = par[par[a]]
+            a = par[a]
+        return a
+
+    for t in F:
+        r0 = find(t[0])
+        for v in t[1:]:
+            r = find(v)
+            if r != r0:
+                par[r] = r0
+    roots = np.array([find(t[0]) for t in F])
+    return np.unique(roots, return_inverse=True)[1].ravel()
+
+
+def make_inside(V, F):
+    comp = components(F)
+    parts = [F[comp == c] for c in np.unique(comp)]
+
+    def fn(points):
+        out = np.zeros(len(points), bool)
+        for P in parts:
+            out |= inside(points, V, P)
+        return out
+
+    return fn
+
+
+def internal_faces(V, F, ins, eps):
+    c = V[F].mean(1)
+    n = tri_normals(V, F)
+    return ins(c + eps * n) & ins(c - eps * n)
+
+
+def wet_distance(lo, hi, dx, V, F, seeds, max_iter=2000, ins=None):
     i0 = np.ceil(lo / dx - 0.5 - 1e-9).astype(int)
     i1 = np.floor(hi / dx - 0.5 + 1e-9).astype(int)
     shape = tuple(int(v) for v in (i1 - i0 + 1))
     pts = lattice(lo, hi, dx)
-    solid = inside(pts, V, F).reshape(shape)
+    solid = (ins(pts) if ins else inside(pts, V, F)).reshape(shape)
     D = np.full(shape, np.iinfo(np.int32).max, np.int32)
     k = np.round(seeds / dx - 0.5).astype(int) - i0
     ok = np.all((k >= 0) & (k < shape), 1)
@@ -184,9 +225,11 @@ def build(spec, geom=None, layers=4):
                 warn.append("형상이 닫힌 표면이 아니어서 벽 입자를 만들지 못했습니다. 얇은 판·열린 표면은 3단계에서 지원합니다")
             else:
                 V = np.asarray(geom.vertices, float)
+                ins = make_inside(V, F_all)
                 gmin, gmax = V.min(0), V.max(0)
                 cand = lattice(np.maximum(gmin, lo), np.minimum(gmax, hi), dx)
-                solid = cand[inside(cand, V, F_all)]
+                solid = cand[ins(cand)]
+                keep &= ~internal_faces(V, F_all, ins, 0.25 * dx)
                 Fw = F_all[keep]
                 cp, dist, tri = closest(solid, V, Fw)
                 band = dist <= layers * dx
@@ -199,42 +242,93 @@ def build(spec, geom=None, layers=4):
                 ecp = np.zeros((0, 3))
                 etri = np.zeros(0, int)
                 if len(seeds):
-                    look = wet_distance(lo, hi, dx, V, F_all, seeds)
+                    look = wet_distance(lo, hi, dx, V, F_all, seeds, ins=ins)
                     d1 = look(2 * cp - solid)
                     d2 = np.where(np.isfinite(dist2) & (dist2 <= layers * dx), look(2 * cp2 - solid), np.iinfo(np.int64).max)
                     flip = d2 < d1
                     cp[flip], tri[flip] = cp2[flip], tri2[flip]
                     pad = layers * dx
                     near = lattice(np.maximum(gmin - pad, lo), np.minimum(gmax + pad, hi), dx)
-                    near = near[~inside(near, V, F_all)]
+                    near = near[~ins(near)]
                     dn = look(near)
                     near, dn = near[dn > 2 * layers], dn[dn > 2 * layers]
-                    bcp, bd, btri = closest(near, V, Fw, tn=tnw, behind=True)
-                    ok = (bd <= layers * dx) & (bd > 0.5 * dx)
-                    near, dn, bcp, btri = near[ok], dn[ok], bcp[ok], btri[ok]
-                    wetter = look(2 * bcp - near) + layers < dn
-                    extra, ecp, etri = near[wetter], bcp[wetter], btri[wetter]
+                    if len(near) and len(solid):
+                        from scipy.spatial import cKDTree
+
+                        _, k = cKDTree(solid).query(near)
+                        bcp, btri = cp[k], tri[k]
+                        into = bcp - solid[k]
+                        side = ((near - bcp) * into).sum(1) < 0
+                        bd = np.linalg.norm(near - bcp, axis=1)
+                        gh = 2 * bcp - near
+                        ok = side & (bd <= layers * dx) & (bd > 0.5 * dx) & ~ins(gh) & (look(gh) + layers < dn)
+                        extra, ecp, etri = near[ok], bcp[ok], btri[ok]
                     if len(extra):
                         warn.append(f"벽이 입자 간격에 비해 얇아 바깥쪽에 경계 입자 {len(extra):,}개를 더해 {layers}층을 맞췄습니다")
                 bound = np.vstack([solid, extra])
+                allcp = np.vstack([cp, ecp])
+                alltri = np.concatenate([tri, etri])
+                bad = np.nonzero(ins(2 * allcp - bound))[0]
+                if len(bad):
+                    q = _closest_tri(bound[bad][:, None, :], V[Fw[:, 0]][None], V[Fw[:, 1]][None], V[Fw[:, 2]][None])
+                    d = np.linalg.norm(q - bound[bad][:, None, :], axis=2)
+                    gh = 2 * q - bound[bad][:, None, :]
+                    okg = ~ins(gh.reshape(-1, 3)).reshape(d.shape) & (d > 1e-9)
+                    d = np.where(okg, d, np.inf)
+                    k = d.argmin(1)
+                    fine = np.isfinite(d[np.arange(len(bad)), k])
+                    allcp[bad[fine]] = q[np.arange(len(bad)), k][fine]
+                    alltri[bad[fine]] = k[fine]
+                cp, ecp = allcp[: len(solid)], allcp[len(solid):]
+                tri, etri = alltri[: len(solid)], alltri[len(solid):]
                 normals = 2.0 * (np.vstack([cp, ecp]) - bound)
                 if dim == 2:
                     normals[:, 1] = 0.0
                 group = np.array([walls.index(g) for g in tg[keep][np.concatenate([tri, etri])]], int)
-    fl = []
-    for b in spec.get("fluid_blocks", []):
-        fl.append(lattice(np.maximum(b["box"]["min"], lo), np.minimum(b["box"]["max"], hi), dx))
-    fluid = np.unique(np.round(np.vstack(fl), 6), axis=0) if fl else np.zeros((0, 3))
+    fl, zs = [], []
+    blocks = spec.get("fluid_blocks", [])
+    for b in blocks:
+        pts = lattice(np.maximum(b["box"]["min"], lo), np.minimum(b["box"]["max"], hi), dx)
+        if len(pts):
+            bot = pts[pts[:, 2] <= pts[:, 2].min() + 1e-6] - [0.0, 0.0, dx]
+            held = np.zeros(len(bot), bool)
+            if V is not None:
+                held |= ins(bot)
+                _, dd, _ = closest(bot, V, F_all)
+                held |= dd < dx
+            for o in blocks:
+                if o is not b:
+                    held |= np.all((bot >= np.asarray(o["box"]["min"]) - 1e-6) & (bot <= np.asarray(o["box"]["max"]) + 1e-6), 1)
+            fl.append(pts)
+            zs.append(np.full(len(pts), pts[:, 2].max() if held.mean() > 0.5 else -np.inf))
+    if fl:
+        fluid, first = np.unique(np.round(np.vstack(fl), 6), axis=0, return_index=True)
+        zsurf = np.concatenate(zs)[first]
+    else:
+        fluid, zsurf = np.zeros((0, 3)), np.zeros(0)
     if len(fluid) and V is not None:
-        ins = inside(fluid, V, F_all)
-        fluid = fluid[~ins]
-        _, d, _ = closest(fluid, V, F_all)
-        fluid = fluid[d >= 0.5 * dx - 1e-6]
+        keepf = ~ins(fluid)
+        fluid, zsurf = fluid[keepf], zsurf[keepf]
+        _, d, _ = closest(fluid, V, F_all[~internal_faces(V, F_all, ins, 0.25 * dx)])
+        keepf = d >= 0.5 * dx - 1e-6
+        fluid, zsurf = fluid[keepf], zsurf[keepf]
     if not len(fluid):
         warn.append("유체 입자가 없습니다. 유체 블록을 추가해 주세요")
     if spec.get("inlets"):
         warn.append("유입구는 3단계에서 계산에 연결됩니다. 이번 해석에서는 무시합니다")
     if dim == 2 and not len(fluid) and spec.get("fluid_blocks"):
         warn.append(f"2D 단면 y = {y0:g} mm 에 걸친 유체 블록이 없습니다. 단면 위치를 유체 블록 안으로 옮겨 주세요")
-    return {"fluid": fluid, "bound": bound, "normals": normals, "group": group, "group_names": names, "warnings": warn, "dx": dx, "domain": (lo, hi), "dim": dim, "plane_y": y0}
+    mask = None
+    if V is not None:
+        i0 = np.ceil(lo / dx - 0.5 - 1e-9).astype(int)
+        i1 = np.floor(hi / dx - 0.5 + 1e-9).astype(int)
+        shape = tuple(int(v) for v in (i1 - i0 + 1))
+        sol = ins(lattice(lo, hi, dx)).reshape(shape)
+        pad = np.pad(sol, 1, constant_values=True)
+        deep = sol.copy()
+        for ax in range(3):
+            for sh in (-1, 1):
+                deep &= np.roll(pad, sh, axis=ax)[1:-1, 1:-1, 1:-1]
+        mask = {"origin": (dx * (i0 + 0.5)).tolist(), "h": dx, "mask": deep}
+    return {"solid": mask, "fluid": fluid, "zsurf": zsurf, "bound": bound, "normals": normals, "group": group, "group_names": names, "warnings": warn, "dx": dx, "domain": (lo, hi), "dim": dim, "plane_y": y0}
 
