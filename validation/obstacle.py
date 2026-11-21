@@ -71,7 +71,7 @@ def main():
     res = json.load(open(path)) if os.path.exists(path) else {}
     cfgs = {
         "same": [{"op": "set_particle", "dx": a.dx}, {"op": "set_fluid", "rho0": 1e-9}, {"op": "set_solver", "boundary": "dbc", "scheme": "verlet", "alpha": 0.1, "t_end": 1.0, "fps": 50}],
-        "default": [{"op": "set_particle", "dx": a.dx}, {"op": "set_solver", "t_end": 1.0, "fps": 50}],
+        "mdbc": [{"op": "set_particle", "dx": a.dx}, {"op": "set_solver", "boundary": "mdbc", "scheme": "symplectic", "alpha": 0.02, "t_end": 1.0, "fps": 50}],
     }
     if not a.skip_ours:
         for k, extra in cfgs.items():
@@ -80,6 +80,12 @@ def main():
                 json.dump(res, open(path, "w"), indent=1)
     t, p = dsph_probe(glob.glob(os.path.join(a.dsph, "probe*Press*.csv"))[0])
     tf, fx = dsph_force(os.path.join(a.dsph, "csv"), a.dx / 1000)
+    for k in ("same", "mdbc"):
+        if k in res:
+            tt = np.array(res[k]["time"])
+            fi = np.interp(np.array(tf), tt, res[k]["forces"]["building"]["x"])
+            m = (tf >= 0.3) & (tf <= 1.0)
+            print(k, "building impulse 0.3-1.0 s ours %.2f dsph %.2f N*s" % (np.trapezoid(fi[m], tf[m]), np.trapezoid(fx[m], tf[m])))
     res["dsph"] = {"time": t.tolist(), "p1": p[:, 0].tolist(), "p2": p[:, 1].tolist(), "ftime": tf.tolist(), "fx": fx.tolist()}
     json.dump(res, open(path, "w"), indent=1)
 
@@ -94,7 +100,7 @@ def main():
             plt.rcParams["font.family"] = _f
             break
     fig, ax = plt.subplots(1, 3, figsize=(15, 4.2))
-    sty = {"same": ("#2563eb", "SPH-LLM-web (원본과 같은 설정: DBC·Verlet·α 0.1)"), "default": ("#059669", "SPH-LLM-web 기본 (mDBC·Symplectic·α 0.02)")}
+    sty = {"same": ("#2563eb", "SPH-LLM-web (원본과 같은 설정: DBC·Verlet·α 0.1)"), "mdbc": ("#059669", "SPH-LLM-web mDBC·Symplectic·α 0.02")}
     for k, (c, lab) in sty.items():
         if k in res:
             r = res[k]

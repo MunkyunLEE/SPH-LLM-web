@@ -209,6 +209,7 @@ def build(spec, geom=None, layers=4):
         y0 = dx * (np.round(float(spec.get("plane_y", 0.5 * (lo[1] + hi[1]))) / dx - 0.5) + 0.5)
         lo[1] = hi[1] = y0
     warn = []
+    dry = np.zeros((0, 3))
     bound = np.zeros((0, 3))
     normals = np.zeros((0, 3))
     group = np.zeros(0, int)
@@ -263,6 +264,7 @@ def build(spec, geom=None, layers=4):
                         gh = 2 * bcp - near
                         ok = side & (bd <= layers * dx) & (bd > 0.5 * dx) & ~ins(gh) & (look(gh) + layers < dn)
                         extra, ecp, etri = near[ok], bcp[ok], btri[ok]
+                        dry = near[side & (bd > 0.5 * dx) & (look(gh) + layers < dn)]
                     if len(extra):
                         warn.append(f"벽이 입자 간격에 비해 얇아 바깥쪽에 경계 입자 {len(extra):,}개를 더해 {layers}층을 맞췄습니다")
                 bound = np.vstack([solid, extra])
@@ -329,6 +331,9 @@ def build(spec, geom=None, layers=4):
         for ax in range(3):
             for sh in (-1, 1):
                 deep &= np.roll(pad, sh, axis=ax)[1:-1, 1:-1, 1:-1]
+        kd = np.round(dry / dx - 0.5).astype(int) - i0
+        kd = kd[np.all((kd >= 0) & (kd < shape), 1)]
+        deep[kd[:, 0], kd[:, 1], kd[:, 2]] = True
         mask = {"origin": (dx * (i0 + 0.5)).tolist(), "h": dx, "mask": deep}
     return {"solid": mask, "fluid": fluid, "zsurf": zsurf, "bound": bound, "normals": normals, "group": group, "group_names": names, "warnings": warn, "dx": dx, "domain": (lo, hi), "dim": dim, "plane_y": y0}
 

@@ -96,3 +96,10 @@ def test_solid_mask_marks_wall_interior():
     assert m["mask"][idx([200, 200, -15])]
     assert not m["mask"][idx([200, 200, -5])]
     assert not m["mask"][idx([200, 200, 100])]
+    sp, g = _preset("still_tank", [{"op": "set_particle", "dx": 25}])
+    r = casebuild.build(sp, g)
+    m = r["solid"]
+    assert m["mask"][idx([200, 200, -62.5])] and m["mask"][idx([-62.5, 200, 100])]
+    assert not m["mask"][idx([200, 200, 12.5])] and not m["mask"][idx([12.5, 200, 100])]
+    f = r["fluid"]
+    assert not m["mask"][tuple(np.round((f - m["origin"]) / m["h"]).astype(int).T)].any()

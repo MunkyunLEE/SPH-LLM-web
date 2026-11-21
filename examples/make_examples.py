@@ -129,9 +129,9 @@ def main():
         "dambreak_obstacle": {
             "title": "장애물 댐 붕괴 (DualSPHysics CaseDambreak)",
             "file": "dambreak_obstacle.obj",
-            "note": "DualSPHysics 공식 예제 01_DamBreak 와 같은 장면: 탱크 1600×670×400, 물기둥 400×670×300, 기둥 장애물 120×120×450 (x 900~1020). 물이 약 0.35 s 에 기둥을 칩니다. 벽 하중 그래프의 building Fx 가 기둥이 받는 힘, 프로브는 원본 압력 측정점 (877.9, 300, 20). 원본 입자 간격 8.5 mm, 여기 기본 15 mm",
-            "prompts": ["입자 간격 10 mm", "해석 시간 1.6초", "Verlet으로 바꿔줘"],
-            "ops": [{"op": "set_particle", "dx": 15}, {"op": "set_solver", "t_end": 1.0, "fps": 50}, {"op": "set_domain", "min": [-100, -100, -100], "max": [1700, 770, 700]}, {"op": "add_fluid_block", "name": "물기둥", "box": {"min": [0, 0, 0], "max": [400, 670, 300]}}, {"op": "add_probe", "name": "기둥 앞 바닥", "point": [877.9, 300, 20]}, {"op": "add_probe", "name": "기둥 앞 중간", "point": [877.9, 300, 100]}],
+            "note": "DualSPHysics 공식 예제 01_DamBreak 와 같은 장면: 탱크 1600×670×400, 물기둥 400×670×300, 기둥 장애물 120×120×450 (x 900~1020). 물이 약 0.35 s 에 기둥을 칩니다. 벽 하중 그래프의 building Fx 가 기둥이 받는 힘, 프로브는 원본 압력 측정점 (877.9, 300, 20). 원본 입자 간격 8.5 mm, 여기 기본 15 mm. 해석 설정은 원본 예제와 같게 DBC · Verlet · 인공 점성 α 0.1 (dx 25 mm 에서 원본과 기둥 충격량 0.3~1.0 s 차이 7%). mDBC 로 바꾸면 기둥 하중이 원본보다 약 35% 낮게 나오는 문제가 남아 있어 비교용으로만 쓰십시오",
+            "prompts": ["입자 간격 10 mm", "해석 시간 1.6초", "mDBC로 바꿔줘"],
+            "ops": [{"op": "set_particle", "dx": 15}, {"op": "set_solver", "t_end": 1.0, "fps": 50, "boundary": "dbc", "scheme": "verlet", "alpha": 0.1}, {"op": "set_domain", "min": [-100, -100, -100], "max": [1700, 770, 700]}, {"op": "add_fluid_block", "name": "물기둥", "box": {"min": [0, 0, 0], "max": [400, 670, 300]}}, {"op": "add_probe", "name": "기둥 앞 바닥", "point": [877.9, 300, 20]}, {"op": "add_probe", "name": "기둥 앞 중간", "point": [877.9, 300, 100]}],
         },
         "drop_pool": {
             "title": "물 덩어리 낙하 → 수조",
