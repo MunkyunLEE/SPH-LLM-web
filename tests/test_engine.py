@@ -143,3 +143,16 @@ def test_batched_steps_match_single_steps():
     c.advance(20)
     assert a.time == pytest.approx(c.time, rel=1e-9)
     assert np.allclose(a.snapshot()["pos"], c.snapshot()["pos"], atol=1e-6)
+
+
+def test_float32_path_sends_no_f64_to_kernels():
+    f, b = cases.tank(200, 200, 300, 150, 25)
+    s = wcsph.Solver(Params(dp=25.0, hswl=150.0), f, b, pos64=False)
+    seen = []
+    orig = s._sample
+    s._sample = lambda pts, out: (seen.append((pts.dtype, out.dtype)), orig(pts, out))[1]
+    s.advance(2)
+    u, p, w = s.sample([[100.0, 100.0, 50.0], [100.0, 100.0, 500.0]])
+    assert seen and all(np.dtype(a).itemsize == 4 and np.dtype(c).itemsize == 4 for a, c in seen)
+    assert w[0] > 0.5 and w[1] == 0
+    assert s.pos.dtype == ti.f32

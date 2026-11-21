@@ -657,7 +657,7 @@ class Solver:
             out[m, 4] = den
 
     def sample(self, points):
-        pts = np.ascontiguousarray(np.asarray(points, np.float64).reshape(-1, 3))
+        pts = np.ascontiguousarray(np.asarray(points, np.float64 if self.pdt == ti.f64 else np.float32).reshape(-1, 3))
         out = np.zeros((len(pts), 5), np.float32)
         if len(pts):
             self._eos()
